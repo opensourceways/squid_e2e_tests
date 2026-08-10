@@ -1,0 +1,3 @@
+configs/certs/*.pem
+configs/certs/*.crt
+test-report.txt

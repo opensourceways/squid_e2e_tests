@@ -1,0 +1,62 @@
+services:
+  squid1:
+    build: ./docker/squid
+    container_name: squid1
+    dns: [8.8.8.8, 1.1.1.1]
+    networks:
+      squid_net:
+        ipv4_address: 172.30.0.11
+    volumes:
+      - ./configs/squid/squid.conf:/etc/squid/squid.conf:ro
+      - ./configs/certs/squid-ca.pem:/etc/squid/certs/squid-ca.pem:ro
+
+  squid2:
+    build: ./docker/squid
+    container_name: squid2
+    dns: [8.8.8.8, 1.1.1.1]
+    networks:
+      squid_net:
+        ipv4_address: 172.30.0.12
+    volumes:
+      - ./configs/squid/squid.conf:/etc/squid/squid.conf:ro
+      - ./configs/certs/squid-ca.pem:/etc/squid/certs/squid-ca.pem:ro
+
+  squid3:
+    build: ./docker/squid
+    container_name: squid3
+    dns: [8.8.8.8, 1.1.1.1]
+    networks:
+      squid_net:
+        ipv4_address: 172.30.0.13
+    volumes:
+      - ./configs/squid/squid.conf:/etc/squid/squid.conf:ro
+      - ./configs/certs/squid-ca.pem:/etc/squid/certs/squid-ca.pem:ro
+
+  haproxy-node1:
+    build: ./docker/node
+    container_name: haproxy-node1
+    cap_add: [NET_ADMIN]
+    networks:
+      squid_net:
+        ipv4_address: 172.30.0.21
+    volumes:
+      - ./configs/keepalived/keepalived-node1.conf:/etc/keepalived/keepalived.conf:ro
+      - ./configs/haproxy/haproxy.cfg:/etc/haproxy/haproxy.cfg:ro
+
+  haproxy-node2:
+    build: ./docker/node
+    container_name: haproxy-node2
+    cap_add: [NET_ADMIN]
+    networks:
+      squid_net:
+        ipv4_address: 172.30.0.22
+    volumes:
+      - ./configs/keepalived/keepalived-node2.conf:/etc/keepalived/keepalived.conf:ro
+      - ./configs/haproxy/haproxy.cfg:/etc/haproxy/haproxy.cfg:ro
+
+networks:
+  squid_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
