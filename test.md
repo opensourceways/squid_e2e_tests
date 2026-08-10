@@ -58,6 +58,16 @@
 期望: 代理连通性正常(其他 Squid 接管),下载需重试但不影响服务可用性
 ```
 
+## 自定义测试 URL
+
+编辑 `configs/test.env` 修改测试目标：
+
+```bash
+HTTP_URL="http://repo.openeuler.org/"
+HTTPS_URL="https://curl.se/"
+HTTPS_CACHE_URL="https://curl.se/download/curl-8.9.1.tar.gz"  # 下载文件用于测缓存
+```
+
 ## 执行
 
 ```bash
