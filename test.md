@@ -9,6 +9,8 @@
 | T3 | HA 节点故障,VIP 漂移,代理继续 | DFX: 零宕机时间 |
 | T4 | HTTPS SSL Bump 缓存生效,二次下载显著加速 | 功能: HTTPS 缓存,减少多次回源 |
 | T5 | 下载中断影响可控 | DFX: 异常场景不影响用户 |
+| T6 | 两台 Squid 同时故障,仅剩 1/3 继续服务 | DFX: 多实例故障容错 |
+| T7 | HAProxy Node 宕机,VIP 自动漂移 | DFX: Node 级故障零中断 |
 
 ## 测试环境
 
@@ -67,6 +69,20 @@
 
 # 清理
 ./scripts/cleanup.sh
+```
+
+### T6: 两台 Squid 同时故障 (`tests/06-double-squid-fail.sh`)
+
+```
+操作: 同时停止两台 Squid(仅剩 1/3) → 通过 VIP 代理请求 → 恢复
+期望: 所有请求 HTTP 200（HAProxy 自动仅向存活的 Squid 发请求）
+```
+
+### T7: HAProxy Node 故障 (`tests/07-node-crash.sh`)
+
+```
+操作: 停止持有 VIP 的 HAProxy Node → 检查 VIP 漂移到另一个 Node → 代理请求 → 恢复
+期望: VIP 自动漂移,代理请求 HTTP 200
 ```
 
 测试报告自动输出到 `test-report.txt`。
