@@ -1,3 +1,8 @@
+# 固定 project 名。Compose 默认拿目录名当 project 名,网络就成了 <目录名>_squid_net;
+# 而 tests/lib.sh 与 scripts/test-all.sh 里写死的是 haproxy_ha_squid_net。
+# 按 README 把仓库 clone 成 squid_e2e_tests,网络名就对不上,6 个测试全部连不上。
+name: haproxy_ha
+
 services:
   squid1:
     build: ./docker/squid
