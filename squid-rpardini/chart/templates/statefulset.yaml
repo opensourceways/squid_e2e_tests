@@ -1,0 +1,230 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: squid-cache
+  namespace: {{ .Values.namespace }}
+spec:
+  serviceName: squid-cache-headless
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app: squid-cache
+  template:
+    metadata:
+      labels:
+        app: squid-cache
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: squid-cache
+              topologyKey: kubernetes.io/hostname
+      {{- if .Values.registryProxy.enabled }}
+      initContainers:
+      - name: ca-split
+        image: {{ .Values.images.initContainer.repository }}:{{ .Values.images.initContainer.tag }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          MIRROR={{ .Values.alpineMirror }}
+          cat > /etc/apk/repositories <<EOF
+          $MIRROR/main
+          $MIRROR/community
+          EOF
+          apk add --no-cache openssl
+          openssl x509 -in /src/squid-ca-bundle.pem -out /ca/ca.crt
+          openssl pkey -in /src/squid-ca-bundle.pem -out /ca/ca.key
+          echo "CA split done:" && ls -l /ca
+        volumeMounts:
+        - name: squid-ca
+          mountPath: /src
+          readOnly: true
+        - name: registry-ca
+          mountPath: /ca
+      {{- end }}
+
+      containers:
+      - name: squid
+        image: {{ .Values.images.squid.repository }}:{{ .Values.images.squid.tag }}
+        ports:
+        - containerPort: 3129
+          name: proxy
+        volumeMounts:
+        - name: squid-config
+          mountPath: /etc/squid/squid.conf
+          subPath: squid.conf
+        - name: squid-ca
+          mountPath: /etc/squid/ssl_cert
+          readOnly: true
+        - name: cache
+          mountPath: /var/spool/squid
+        command:
+        - /bin/sh
+        - -c
+        - |
+          MIRROR={{ .Values.alpineMirror }}
+          cat > /etc/apk/repositories <<EOF
+          $MIRROR/main
+          $MIRROR/community
+          EOF
+
+          apk add --no-cache squid openssl python3 ca-certificates curl
+
+          if [ -f /etc/squid/ssl_cert/squid-ca-bundle.pem ]; then
+            if [ ! -d /var/cache/squid-ssl-db ]; then
+              /usr/lib/squid/security_file_certgen \
+                -c -s /var/cache/squid-ssl-db -M 8MB
+              chown -R squid:squid /var/cache/squid-ssl-db 2>/dev/null || true
+            fi
+          fi
+
+          MISSING=0
+          for i in 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F; do
+            [ -d /var/spool/squid/$i ] || MISSING=1
+          done
+          if [ "$MISSING" = "1" ]; then
+            printf 'cache_dir ufs /var/spool/squid {{ .Values.squid.cacheDiskSize }} 16 8\npid_filename /tmp/squid-init.pid\n' > /tmp/squid-init.conf
+            squid -z -f /tmp/squid-init.conf 2>&1 || true
+            rm -f /tmp/squid-init.pid 2>/dev/null || true
+          fi
+
+          rm -f /run/squid.pid /var/run/squid.pid /var/run/squid/squid.pid 2>/dev/null || true
+
+          mkdir -p /var/log/squid
+          tail -F /var/log/squid/access.log &
+          tail -F /var/log/squid/cache.log >&2 &
+
+          exec squid -NYC
+        readinessProbe:
+          httpGet:
+            path: /squid-internal-mgr/info
+            port: 3129
+            scheme: HTTP
+          initialDelaySeconds: 20
+          periodSeconds: {{ .Values.probes.readinessPeriodSeconds }}
+          failureThreshold: {{ .Values.probes.readinessFailureThreshold }}
+        livenessProbe:
+          httpGet:
+            path: /squid-internal-mgr/info
+            port: 3129
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: {{ .Values.probes.livenessPeriodSeconds }}
+          failureThreshold: {{ .Values.probes.livenessFailureThreshold }}
+        resources:
+          {{- toYaml .Values.squid.resources | nindent 10 }}
+
+      {{- if .Values.exporter.enabled }}
+      - name: squid-exporter
+        image: {{ .Values.images.exporter.repository }}:{{ .Values.images.exporter.tag }}
+        ports:
+        - containerPort: {{ .Values.exporter.listenPort }}
+          name: metrics
+        env:
+        - name: SQUID_HOSTNAME
+          value: "127.0.0.1"
+        - name: SQUID_PORT
+          value: {{ .Values.exporter.squidPort | quote }}
+        - name: SQUID_EXPORTER_LISTEN
+          value: ":{{ .Values.exporter.listenPort }}"
+        resources:
+          {{- toYaml .Values.exporter.resources | nindent 10 }}
+      {{- end }}
+
+      {{- if .Values.registryProxy.enabled }}
+      - name: registry-proxy
+        image: {{ .Values.images.registryProxy.repository }}:{{ .Values.images.registryProxy.tag }}
+        ports:
+        - containerPort: 3128
+          name: registry
+        env:
+        - name: REGISTRIES
+          value: {{ .Values.registryProxy.registries | quote }}
+        - name: ENABLE_MANIFEST_CACHE
+          value: {{ .Values.registryProxy.enableManifestCache | quote }}
+        - name: DISABLE_IPV6
+          value: "true"
+        - name: CACHE_MAX_SIZE
+          value: {{ .Values.registryProxy.cacheMaxSize | quote }}
+        - name: ALLOW_PUSH
+          value: {{ .Values.registryProxy.allowPush | quote }}
+        - name: PROXY_READ_TIMEOUT
+          value: {{ .Values.registryProxy.proxyReadTimeout | quote }}
+        - name: PROXY_SEND_TIMEOUT
+          value: {{ .Values.registryProxy.proxySendTimeout | quote }}
+        - name: PROXY_CONNECT_READ_TIMEOUT
+          value: {{ .Values.registryProxy.proxyConnectReadTimeout | quote }}
+        - name: SEND_TIMEOUT
+          value: {{ .Values.registryProxy.sendTimeout | quote }}
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3128
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: {{ .Values.probes.readinessPeriodSeconds }}
+          failureThreshold: {{ .Values.probes.readinessFailureThreshold }}
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3128
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: {{ .Values.probes.livenessPeriodSeconds }}
+          failureThreshold: {{ .Values.probes.livenessFailureThreshold }}
+        volumeMounts:
+        - name: registry-ca
+          mountPath: /ca
+        - name: registry-cache
+          mountPath: /docker_mirror_cache
+        resources:
+          {{- toYaml .Values.registryProxy.resources | nindent 10 }}
+      {{- end }}
+
+      volumes:
+      - name: squid-config
+        configMap:
+          name: squid-config
+          items:
+          - key: squid.conf
+            path: squid.conf
+      - name: squid-ca
+        secret:
+          secretName: squid-ca
+          items:
+          - key: squid-ca-bundle.pem
+            path: squid-ca-bundle.pem
+      {{- if .Values.registryProxy.enabled }}
+      - name: registry-ca
+        emptyDir: {}
+      {{- end }}
+  volumeClaimTemplates:
+  - metadata:
+      name: cache
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: {{ .Values.persistence.squidCache.storageClass }}
+      resources:
+        requests:
+          storage: {{ .Values.persistence.squidCache.size }}
+  {{- if .Values.registryProxy.enabled }}
+  - metadata:
+      name: registry-cache
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: {{ .Values.persistence.registryCache.storageClass }}
+      resources:
+        requests:
+          storage: {{ .Values.persistence.registryCache.size }}
+  {{- end }}
