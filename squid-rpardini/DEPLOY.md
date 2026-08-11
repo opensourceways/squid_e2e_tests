@@ -8,10 +8,16 @@
 ```
 squid-rpardini/
 ├── chart/                  # ⚠️ 与 ascend-ci-deployment/manifests/squid-rpardini/chart 同步的副本
+├── values-006.yaml         # ⚠️ gy-006 集群的值文件（the value of gy-006）
 ├── tool/                   # 16 个 CI 工具 e2e 测试（pip/apt/github/goproxy/bazel/npm/cargo/...）
 ├── SQUID-OVERVIEW.md       # 架构、路由、缓存策略、HA 设计
+├── VERIFICATION.md         # gy-006 部署状态 + 监控接线验证记录
 └── DEPLOY.md               # 本文件：部署 + 注入
 ```
+
+> **values 文件说明**：`values-006.yaml` 是 **gy-006 集群**（openmerlin-guiyang-006）的 values
+> （replicas=2 双活、amd64、PVC 50Gi+200Gi、Vault secretDefinition）。
+> 其他集群：`ascend-ci-deployment/argocd/clusters/squid-rpardini/values-{cn12-001,hk-001}.yaml`。
 
 ## 1. 部署
 
@@ -92,6 +98,9 @@ helm upgrade squid ./manifests/squid-rpardini/chart \
   -f argocd/clusters/squid-rpardini/values-006.yaml \
   -n squid --kubeconfig ~/.kube/gy-006.yaml
 ```
+
+> gy-006 的 values 同步副本见本目录 `values-006.yaml`（ArgoCD `$values` 源指向
+> `ascend-ci-deployment/argocd/clusters/squid-rpardini/values-006.yaml`）。
 
 ### 1.5 部署验证
 
@@ -239,7 +248,21 @@ EOF
 所有 16 个 case 共用同一注入配方；`run-tool-tests.sh` 会自动生成 "-direct" 变体
 （去掉全部代理/CA env）做有无 squid 的耗时对比。
 
-## 3. 常见问题
+## 3. 监控
+
+数据链路与已生效状态见 **`VERIFICATION.md`**（gy-006 实测）。要点：
+
+```
+squid-cache.squid:9301 (exporter)
+  → prometheus-agent scrape (job: squid)
+  → remote_write → 中央 http://113.44.182.82:9090
+```
+
+- ⚠️ 修改 agent ConfigMap 后必须 `POST /-/reload` 才生效（agent 参数已含 `--web.enable-lifecycle`）。
+- 查询入口：squid 指标在中央 113.44.182.82；1.95.134.239 是 pull 型 NPU 监控，不含 squid。
+- registry 镜像流量走 splice（TCP_TUNNEL），不计入 squid HTTP counter；缓存效果看 registry-proxy 日志。
+
+## 4. 常见问题
 
 | 症状 | 原因 | 解决 |
 |------|------|------|

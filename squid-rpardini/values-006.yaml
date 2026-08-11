@@ -1,0 +1,53 @@
+# ⚠️ 本文件是 **gy-006 集群**（openmerlin-guiyang-006）的 values 文件 —— the value of gy-006
+#
+# 部署时使用（ArgoCD 的 $values 源，或 helm -f）：
+#   helm install squid ./chart -f values-006.yaml -n squid --kubeconfig ~/.kube/gy-006.yaml
+#
+# 与 ascend-ci-deployment/argocd/clusters/squid-rpardini/values-006.yaml 保持同步。
+# 其他集群的值：values-cn12-001.yaml（cn12-001）、values-hk-001.yaml（hk-001）。
+#
+# Environment 006: production-grade resources, dual-active replicas
+replicas: 2
+
+nodeSelector:
+  kubernetes.io/arch: amd64
+
+squid:
+  maxObjectSize: 8192
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+
+registryProxy:
+  proxyReadTimeout: "300s"
+  proxySendTimeout: "300s"
+  proxyConnectReadTimeout: "300s"
+  sendTimeout: "300s"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 8
+      memory: 16Gi
+
+persistence:
+  squidCache:
+    size: 50Gi
+  registryCache:
+    size: 200Gi
+
+secretDefinition:
+  enabled: true
+  vaultPath: secrets/data/ascend/ci
+  caBundleKey: squid_ca_bundle_v3_pem
+  caPublicKey: squid_ca_v3_pem
+  caNamespaces:
+  - buildkitd
+  - ascend-gha-runners
+  - nv-action
+  - squid
