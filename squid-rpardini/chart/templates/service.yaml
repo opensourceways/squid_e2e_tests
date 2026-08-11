@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: squid-cache
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+  - port: 3128
+    name: proxy
+    targetPort: 3129
+  {{- if .Values.exporter.enabled }}
+  - port: {{ .Values.exporter.listenPort }}
+    name: metrics
+    targetPort: {{ .Values.exporter.listenPort }}
+  {{- end }}
+  selector:
+    app: squid-cache
+---
+# Headless service: required by the StatefulSet (stable pod network identity).
+# Clients keep using the ClusterIP service above; this one is only for
+# <pod>.<service>.<namespace>.svc DNS records (e.g. squid-cache-0/1).
+apiVersion: v1
+kind: Service
+metadata:
+  name: squid-cache-headless
+  namespace: {{ .Values.namespace }}
+spec:
+  clusterIP: None
+  ports:
+  - port: 3129
+    name: proxy
+  {{- if .Values.exporter.enabled }}
+  - port: {{ .Values.exporter.listenPort }}
+    name: metrics
+  {{- end }}
+  selector:
+    app: squid-cache

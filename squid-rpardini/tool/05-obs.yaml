@@ -1,0 +1,181 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: test-squid-obs-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-squid-obs
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 1800
+  tasks:
+    - name: test-squid-obs
+      replicas: 1
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+              command:
+                - bash
+                - -c
+              args:
+                - |
+                  #!/bin/bash
+                  set -e
+
+                  sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.huaweicloud.com/ubuntu-ports|g' \
+                    /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
+                  apt-get update -qq 2>&1 | tail -2 || true
+                  apt-get install -y -qq curl 2>&1 | tail -3 || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq curl 2>&1 | tail -3; }
+                  T_START=$(date +%s%3N)
+
+                  echo ""
+                  echo "=========================================="
+                  echo "Scenario 5: obsutil (OBS CLI — real usage from"
+                  echo "             ascend-pytorch vcjob: obsutil config + obsutil cp"
+                  echo "             obs://pytorch-package/...)"
+                  echo "=========================================="
+
+                  echo "--- Download official obsutil binary (obs-community bucket, ~4.2MB) ---"
+                  curl -sL -o /tmp/obsutil.tar.gz \
+                    "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_arm64.tar.gz"
+                  ls -la /tmp/obsutil.tar.gz
+                  cd /tmp && tar -xzf obsutil.tar.gz
+                  OBSUTIL_DIR=$(find /tmp -maxdepth 2 -type d -name "obsutil_linux_arm64*" | head -1)
+                  chmod 755 "$OBSUTIL_DIR/obsutil"
+                  export PATH="$OBSUTIL_DIR:$PATH"
+                  obsutil version
+
+                  echo ""
+                  echo "--- Configure obsutil (AK/SK + endpoint, real values from the"
+                  echo "     ascend-pytorch vcjob) ---"
+                  # Proxy routing comes ONLY from env (HTTP_PROXY/HTTPS_PROXY +
+                  # SSL_CERT_FILE injected in the pod spec). obsutil is Go-based:
+                  # it honors HTTPS_PROXY and SSL_CERT_FILE like curl. No proxy
+                  # config here — direct variant simply has no proxy env.
+                  obsutil config -i=HPUAQXLD0JZLS49IN1XR -k=BbL1U0XONw1iu2oIvM0sDbuMTVr75UhK7EkJAvrl \
+                    -e=obs.cn-north-4.myhuaweicloud.com 2>&1 | tail -2
+                  echo "✅ obsutil configured"
+
+                  echo ""
+                  echo "--- Real operation 1: obsutil ls (list bucket) ---"
+                  obsutil ls obs://pytorch-package/ 2>&1 | head -8
+
+                  echo ""
+                  echo "--- Real operation 2: obsutil cp a real object ---"
+                  # exact object from the ascend-pytorch vcjob
+                  # (pytorchv2.9.0-7.3.0_3.10_aarch64.tar.gz, 28MB, public-read)
+                  T0=$(date +%s%3N)
+                  obsutil cp obs://pytorch-package/pta/personal/cache/pytorch/v2.9.0-7.3.0/pytorchv2.9.0-7.3.0_3.10_aarch64.tar.gz /tmp/ \
+                    2>&1 | tail -3
+                  T1=$(date +%s%3N)
+                  R=$((T1 - T0))
+                  ls -la /tmp/pytorchv2.9.0-7.3.0_3.10_aarch64.tar.gz
+                  echo "obsutil cp: ${R}ms"
+                  echo "✅ obsutil download OK"
+
+                  echo ""
+                  echo "=========================================="
+                  T_END=$(date +%s%3N)
+                  echo "DURATION: $((T_END - T_START))ms"
+                  echo "✅ Scenario 5 completed."
+                  echo "=========================================="
+              lifecycle:
+                postStart:
+                  exec:
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set +e
+
+                        # Bazel JVM trust: point JVM at the mounted squid-CA keystore
+                        # (Bazel ignores JAVA_TOOL_OPTIONS; args must come via .bazelrc)
+                        cat > "$WORKSPACE/.bazelrc" << 'EOF'
+                        common --noenable_bzlmod
+                        common --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/
+                        build --cxxopt=-std=c++17
+                        startup --host_jvm_args=-Djavax.net.ssl.trustStore=/etc/squid-bazel-trust/squid-bazel-trust.jks
+                        startup --host_jvm_args=-Djavax.net.ssl.trustStorePassword=changeit
+                        EOF
+
+                        P=/etc/squid-ca/squid-ca.pem
+                        if [ -f "$P" ]; then
+                          if [ -d /etc/pki/ca-trust/source/anchors ]; then
+                            cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                            update-ca-trust extract >/dev/null 2>&1
+                          else
+                            cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                            update-ca-certificates -f >/dev/null 2>&1
+                          fi
+                        fi
+
+                        if command -v apt-get >/dev/null 2>&1 && [ -n "$HTTPS_PROXY" ]; then
+                          mkdir -p /etc/apt/apt.conf.d
+                          printf 'Acquire::http::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\nAcquire::https::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\n' > /etc/apt/apt.conf.d/99squid-proxy
+                        fi
+
+                        exit 0
+              workingDir: /workspace
+              resources:
+                limits:
+                  cpu: "2"
+                  memory: 2Gi
+                requests:
+                  cpu: "2"
+                  memory: 2Gi
+              env:
+                - name: WORKSPACE
+                  value: /workspace
+                - name: HTTP_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: HTTPS_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: http_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: https_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: NO_PROXY
+                  value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+                - name: no_proxy
+                  value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+                - name: SSL_CERT_FILE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: CURL_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: REQUESTS_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: PIP_CERT
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: NODE_EXTRA_CA_CERTS
+                  value: /etc/squid-ca/squid-ca.pem
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true
+          nodeSelector:
+            kubernetes.io/arch: arm64
+          imagePullSecrets:
+            - name: huawei-swr-image-pull-secret-model-gy
+          activeDeadlineSeconds: 2400
+          securityContext:
+            runAsUser: 0
+          restartPolicy: Never

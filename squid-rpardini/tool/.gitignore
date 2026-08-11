@@ -1,0 +1,3 @@
+# runtime artifacts from run-tool-tests.sh — regenerated on each run
+logs/
+*.direct.yaml

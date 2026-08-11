@@ -1,0 +1,95 @@
+namespace: squid
+
+# Dual-active replicas: every pod runs squid + registry-proxy with its OWN
+# cache PVC (volumeClaimTemplates). Traffic is load-balanced by the Service;
+# if one pod dies the other keeps serving - no failover window.
+replicas: 2
+nodeSelector: {}
+
+# Probe tuning. readiness drives Service endpoint membership, so keep it
+# fast: 5s x 2 = worst-case ~10s to drop a dead endpoint (HTTP cachemgr
+# check, not TCP - catches stuck-but-listening squid).
+probes:
+  readinessPeriodSeconds: 5
+  readinessFailureThreshold: 2
+  livenessPeriodSeconds: 10
+  livenessFailureThreshold: 3
+
+images:
+  squid:
+    repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine
+    tag: "3.23.3"
+  registryProxy:
+    repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/rpardini/docker-registry-proxy
+    tag: "0.6.5"
+  initContainer:
+    repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine
+    tag: "3.23.3"
+  exporter:
+    repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/boynux/squid-exporter
+    tag: "v1.13.0"
+
+alpineMirror: "https://mirrors.ustc.edu.cn/alpine/v3.23"
+
+squid:
+  cacheMemory: 512
+  cacheDiskSize: 20480
+  maxObjectSize: 8192
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+
+exporter:
+  enabled: true
+  # boynux/squid-exporter reads Squid stats via the cachemgr HTTP endpoint
+  # (http://127.0.0.1:3129/squid-internal-mgr/info), no SNMP required.
+  squidPort: 3129
+  listenPort: 9301
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+registryProxy:
+  enabled: true
+  registries: "swr.cn-north-4.myhuaweicloud.com swr.cn-southwest-2.myhuaweicloud.com registry.k8s.io ghcr.io gcr.io quay.io"
+  enableManifestCache: "false"
+  cacheMaxSize: "100g"
+  allowPush: "true"
+  proxyReadTimeout: "300s"
+  proxySendTimeout: "300s"
+  proxyConnectReadTimeout: "300s"
+  sendTimeout: "300s"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 2
+      memory: 2Gi
+
+# Per-pod cache PVCs (created via volumeClaimTemplates). Each replica has
+# its own RWO volume - no shared write path, no arbitration needed.
+persistence:
+  squidCache:
+    size: 50Gi
+    storageClass: sfsturbo-subpath-sc
+  registryCache:
+    size: 200Gi
+    storageClass: sfsturbo-subpath-sc
+
+secretDefinition:
+  enabled: false
+  vaultPath: secrets/data/ascend/ci
+  caBundleKey: squid_ca_bundle_pem
+  caPublicKey: squid_ca_pem
+  caNamespaces: []
+  # - buildkitd
+  # - ascend-gha-runners
