@@ -1,0 +1,6 @@
+apiVersion: v2
+name: squid-rpardini
+description: Squid proxy with SSL Bump + registry cache sidecar for CI workloads
+type: application
+version: 0.1.3
+appVersion: "7.6"
