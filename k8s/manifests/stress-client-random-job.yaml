@@ -1,0 +1,58 @@
+# 随机包下载 client —— 每个并发从包列表随机挑一个包下载(模拟真实混合命中)
+# 每 pod 内并发 PER_POD 个下载, 各自随机选包
+# envsubst 注入 RUN_ID / PODS / PER_POD
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stress-rand-${RUN_ID}
+  namespace: test-husheng
+  labels:
+    app: stress-client
+spec:
+  parallelism: ${PODS}
+  completions: ${PODS}
+  backoffLimit: ${PODS}
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        app: stress-client
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: ca
+          secret:
+            secretName: squid-ca
+        - name: pkgs
+          configMap:
+            name: pkg-list
+      containers:
+        - name: client
+          image: alpine/curl:latest
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/ca
+              readOnly: true
+            - name: pkgs
+              mountPath: /etc/pkgs
+              readOnly: true
+          command:
+            - sh
+            - -c
+            - |
+              BASE="https://repo.openeuler.org/openEuler-23.03/debuginfo/aarch64/Packages"
+              TOTAL=$(wc -l < /etc/pkgs/packages.txt)
+              i=0
+              while [ $i -lt ${PER_POD} ]; do
+                (
+                  # 随机选一个包
+                  LINE=$(( (RANDOM % TOTAL) + 1 ))
+                  PKG=$(sed -n "${LINE}p" /etc/pkgs/packages.txt)
+                  curl --cacert /etc/ca/squid-ca.pem -fsSL -o /dev/null \
+                    -x http://squid-stress.test-husheng.svc.cluster.local:3128 \
+                    -w "OK pkg=${PKG} time=%{time_total}s size=%{size_download} speed=%{speed_download}\n" \
+                    "$BASE/$PKG" --max-time 300 || echo "FAIL pkg=${PKG}"
+                ) &
+                i=$((i+1))
+              done
+              wait

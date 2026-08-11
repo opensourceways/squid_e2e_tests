@@ -2,4 +2,5 @@ configs/certs/*.pem
 configs/certs/*.crt
 test-report.txt
 result.json
+k8s/*.csv
 buildkit/src/
