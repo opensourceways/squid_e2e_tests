@@ -1,0 +1,9 @@
+# 仅供有 namespace 创建权限的环境使用。
+# 本测试集群共享已有 namespace `test-husheng`(SA 权限绑定于此),deploy.sh 不创建 ns。
+# 若在自有集群部署,把各 manifest 的 namespace 改回本文件的名字并先 apply 本文件。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-husheng
+  labels:
+    app: squid-cache

@@ -1,0 +1,49 @@
+# 压测并发 client(指向 squid-stress)
+# 每个 pod 内并发起 PER_POD 个下载 → 少量 pod 即可打出大并发
+# 总并发 N = PODS × PER_POD
+# envsubst 注入 RUN_ID / PODS / PER_POD / RPM_URL
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stress-client-${RUN_ID}
+  namespace: test-husheng
+  labels:
+    app: stress-client
+spec:
+  parallelism: ${PODS}
+  completions: ${PODS}
+  backoffLimit: ${PODS}
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        app: stress-client
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: ca
+          secret:
+            secretName: squid-ca
+      containers:
+        - name: client
+          image: alpine/curl:latest
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/ca
+              readOnly: true
+          command:
+            - sh
+            - -c
+            - |
+              # 每 pod 内并发起 PER_POD 个下载
+              i=0
+              while [ $i -lt ${PER_POD} ]; do
+                (
+                  curl --cacert /etc/ca/squid-ca.pem -fsSL -o /dev/null \
+                    -x http://squid-stress.test-husheng.svc.cluster.local:3128 \
+                    -w "OK time=%{time_total}s speed=%{speed_download}\n" \
+                    "${RPM_URL}" --max-time 300 || echo "FAIL"
+                ) &
+                i=$((i+1))
+              done
+              wait
