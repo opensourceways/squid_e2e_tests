@@ -1,0 +1,41 @@
+# 两个 Service:
+#  1) headless — StatefulSet 稳定网络标识(squid-0.squid-headless...)
+#  2) clusterip — 客户端入口, ClientIP 亲和实现缓存去重(等价 HAProxy balance source)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: squid-headless
+  namespace: test-husheng
+  labels:
+    app: squid-cache
+spec:
+  clusterIP: None                    # headless
+  selector:
+    app: squid-cache
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: 3128
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: squid
+  namespace: test-husheng
+  labels:
+    app: squid-cache
+spec:
+  type: ClusterIP
+  selector:
+    app: squid-cache
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: 3128
+  # 缓存去重: 同一客户端 IP 固定路由到同一副本, 避免缓存重复稀释命中率
+  # (K8s 原生无 URL 级一致性哈希; ClientIP 亲和 = HAProxy balance source 的等价物)
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600

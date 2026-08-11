@@ -1,0 +1,88 @@
+# 压测用 Squid Deployment(emptyDir, 可自由调度, 参数化副本/资源)
+# 用 envsubst 注入 REPLICAS / CPU_LIMIT / MEM_LIMIT
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: squid-stress
+  namespace: test-husheng
+  labels:
+    app: squid-stress
+spec:
+  type: ClusterIP
+  selector:
+    app: squid-stress
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: 3128
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: squid-stress
+  namespace: test-husheng
+  labels:
+    app: squid-stress
+spec:
+  replicas: ${REPLICAS}
+  selector:
+    matchLabels:
+      app: squid-stress
+  template:
+    metadata:
+      labels:
+        app: squid-stress
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: squid-stress
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: squid
+          image: tommylike/squid-sslbump:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3128
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "${CPU_LIMIT}"
+              memory: "${MEM_LIMIT}"
+          volumeMounts:
+            - name: cache
+              mountPath: /var/spool/squid
+            - name: squid-config
+              mountPath: /etc/squid/squid.conf
+              subPath: squid.conf
+            - name: squid-ca
+              mountPath: /etc/squid/certs
+              readOnly: true
+          readinessProbe:
+            tcpSocket: { port: 3128 }
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket: { port: 3128 }
+            periodSeconds: 20
+            failureThreshold: 3
+      volumes:
+        - name: cache
+          emptyDir: {}          # 临时缓存, 免 PVC/AZ 约束
+        - name: squid-config
+          configMap:
+            name: squid-stress-config
+        - name: squid-ca
+          secret:
+            secretName: squid-ca

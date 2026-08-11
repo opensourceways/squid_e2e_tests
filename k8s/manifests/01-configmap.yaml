@@ -1,0 +1,50 @@
+# Squid 配置 (ConfigMap) — 测试规格 N=20, R=1
+# 对应 sizing/SQUID-SIZING-K8S.md 的驱动模型
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: squid-config
+  namespace: test-husheng
+  labels:
+    app: squid-cache
+data:
+  squid.conf: |
+    # ---- HTTP 代理 + HTTPS SSL Bump 缓存 ----
+    http_port 3128 ssl-bump \
+      cert=/etc/squid/certs/squid-ca.pem \
+      generate-host-certificates=on \
+      dynamic_cert_mem_cache_size=4MB
+
+    sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/spool/squid/ssl_db -M 4MB
+
+    # ⚠️ 测试用 bump all；生产改为域名白名单(见 sizing 报告 / squid.conf 注释)
+    ssl_bump bump all
+
+    dns_nameservers 8.8.8.8 1.1.1.1
+
+    acl all src all
+    http_access allow all
+
+    # ---- 磁盘缓存 (R=1: d×R/0.8 ≈ 25GB 总; 3 副本去重后单副本 ~8GB, PVC 给 10GB) ----
+    # 单副本承载分片: cache_dir 容量设 8000MB(8GB), 留 PVC 20% 余量
+    cache_dir aufs /var/spool/squid 8000 16 256
+    cache_mem 256 MB
+    # 大文件场景: 上限调大, 否则 RPM/层不缓存
+    maximum_object_size 4 GB
+
+    # 替换策略: 磁盘 LFUDA 最大化字节命中(省出向带宽), 内存 GDSF 最大化对象命中(省IOPS)
+    cache_replacement_policy heap LFUDA
+    memory_replacement_policy heap GDSF
+
+    # 缓存策略: 包/镜像类长 TTL 提命中率
+    refresh_pattern -i \.(rpm|deb|tar\.gz|tgz|apk|whl|iso)$ 1440 90% 43200
+    refresh_pattern . 1440 50% 4320 override-expire
+
+    # 并发连接: FD = N×2 = 100, 留余量
+    max_filedescriptors 4096
+
+    # 日志: 写到 /var/log/squid(emptyDir), 由 start.sh 的 tail 转发到容器 stdout
+    # (proxy 用户无法直接 open /dev/stdout; 且不写 PVC 缓存盘)
+    access_log daemon:/var/log/squid/access.log squid
+    cache_log /var/log/squid/cache.log
+    coredump_dir /var/spool/squid

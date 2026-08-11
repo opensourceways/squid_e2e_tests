@@ -1,0 +1,32 @@
+# 压测专用 Squid 配置(小规格): cache_mem 64MB 配合 128Mi 内存 limit
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: squid-stress-config
+  namespace: test-husheng
+  labels:
+    app: squid-stress
+data:
+  squid.conf: |
+    http_port 3128 ssl-bump \
+      cert=/etc/squid/certs/squid-ca.pem \
+      generate-host-certificates=on \
+      dynamic_cert_mem_cache_size=4MB
+    sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/spool/squid/ssl_db -M 4MB
+    ssl_bump bump all
+    dns_nameservers 8.8.8.8 1.1.1.1
+    acl all src all
+    http_access allow all
+
+    # 小规格: cache_dir 用 emptyDir(临时), cache_mem 小配合 128Mi limit
+    cache_dir aufs /var/spool/squid 2000 16 256
+    cache_mem 64 MB
+    maximum_object_size 4 GB
+    cache_replacement_policy heap LFUDA
+    memory_replacement_policy heap GDSF
+    refresh_pattern -i \.(rpm|deb|tar\.gz|tgz|apk|whl|iso)$ 1440 90% 43200
+    refresh_pattern . 1440 50% 4320 override-expire
+    max_filedescriptors 4096
+    access_log daemon:/var/log/squid/access.log squid
+    cache_log /var/log/squid/cache.log
+    coredump_dir /var/spool/squid

@@ -1,0 +1,94 @@
+# Squid StatefulSet — 持久化缓存(长时间 cache)
+# 规格来自 sizing/SQUID-SIZING-K8S.md 驱动模型: N=20, R=1
+#   副本 3 / 单副本 10Gi PVC / CPU 250m-1 / 内存 512Mi-1Gi
+#   (N=20 入向 1Gbps, 2 副本即够带宽; 保持 3 副本用于验证 HA/去重)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: squid
+  namespace: test-husheng
+  labels:
+    app: squid-cache
+spec:
+  serviceName: squid-headless        # StatefulSet 需配套 headless service
+  replicas: 3                        # N=20 测试规模; 验证 HA + 去重
+  podManagementPolicy: Parallel      # 测试环境并行起 Pod(生产可 OrderedReady)
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: squid-cache
+  template:
+    metadata:
+      labels:
+        app: squid-cache
+    spec:
+      # 反亲和: 副本尽量打散到不同 node, 避免单 node 故障带走多副本
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: squid-cache
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: squid
+          image: tommylike/squid-sslbump:latest   # 见 k8s/docker/(需 build&push)
+          imagePullPolicy: Always
+          ports:
+            - name: proxy
+              containerPort: 3128
+          resources:
+            requests:
+              cpu: "250m"            # B类 crypto-bound, CPU 非瓶颈
+              memory: "512Mi"        # 索引 + cache_mem 256M + SSL 余量
+            limits:
+              cpu: "1"
+              memory: "1Gi"          # SSL 上下文峰值余量, 防 OOMKilled
+          volumeMounts:
+            - name: cache             # PVC: 持久缓存
+              mountPath: /var/spool/squid
+            - name: squid-config
+              mountPath: /etc/squid/squid.conf
+              subPath: squid.conf
+            - name: squid-ca
+              mountPath: /etc/squid/certs
+              readOnly: true
+          # startupProbe: 覆盖缓存重建(swap.state)时间, 阈值放大
+          #   最长容忍 30×10=300s 启动, 期间不被 liveness 杀
+          startupProbe:
+            tcpSocket:
+              port: 3128
+            periodSeconds: 10
+            failureThreshold: 30
+          # readinessProbe: 就绪才进 Service; TCP 3128
+          readinessProbe:
+            tcpSocket:
+              port: 3128
+            periodSeconds: 10
+            failureThreshold: 3
+          # livenessProbe: 进程挂了才重启, 轻量 TCP 探测避免误杀
+          livenessProbe:
+            tcpSocket:
+              port: 3128
+            periodSeconds: 20
+            failureThreshold: 3
+      volumes:
+        - name: squid-config
+          configMap:
+            name: squid-config
+        - name: squid-ca
+          secret:
+            secretName: squid-ca
+  # 每副本独立 PVC: 缓存跨重启持久
+  volumeClaimTemplates:
+    - metadata:
+        name: cache
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: csi-disk    # 测试集群可用的块存储(华为云 CSI, SSD);生产按需替换
+        resources:
+          requests:
+            storage: 10Gi           # d×R/0.8/副本 + 余量; R=1 测试

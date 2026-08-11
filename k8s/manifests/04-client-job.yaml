@@ -1,0 +1,40 @@
+# 并发下载 client (Job) —— 模拟 N 个并发下载流经 Squid
+# 用 envsubst 注入 PARALLELISM / COMPLETIONS / RPM_URL 后 apply
+# 每个 Pod 通过 Service(ClientIP 亲和) 下载同一 RPM, 验证并发下的代理+缓存
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: squid-client-${RUN_ID}
+  namespace: test-husheng
+  labels:
+    app: squid-client
+spec:
+  parallelism: ${PARALLELISM}        # 并发数 N (同时运行的 client Pod)
+  completions: ${COMPLETIONS}        # 总下载次数
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: squid-client
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: ca
+          secret:
+            secretName: squid-ca
+      containers:
+        - name: client
+          image: alpine/curl:latest
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/ca
+              readOnly: true
+          command:
+            - sh
+            - -c
+            - |
+              curl --cacert /etc/ca/squid-ca.pem -fsSL -o /tmp/pkg.rpm \
+                -x http://squid.test-husheng.svc.cluster.local:3128 \
+                -w "OK size=%{size_download} time=%{time_total}s speed=%{speed_download}\n" \
+                "${RPM_URL}" --max-time 300
