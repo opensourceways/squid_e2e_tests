@@ -1,0 +1,20 @@
+# buildkitd 配置 — 内置 MITM 代理链到上游 Squid
+# 关键: [proxy] 段仅在 proxyNetwork = true 时生效
+
+# 开启内置 MITM 代理:给 RUN exec 注入 HTTP(S)_PROXY 并注入 CA
+proxyNetwork = true
+
+[proxy]
+# 上游转发代理 = Squid HA VIP
+upstreamURL = "http://172.30.0.100:3128"
+# 验证 Squid SSL Bump 伪造证书的 CA(= Squid 自签 CA)
+upstreamCACert = "/etc/buildkit/squid-ca.pem"
+
+[worker.oci]
+enabled = true
+# 沙箱网络用 host,确保 RUN 沙箱/代理出向能路由到 Squid VIP(172.30.0.100)
+# (默认 CNI 桥接可能无法路由到 Docker 自定义网络的 VIP)
+net = "host"
+
+[worker.containerd]
+enabled = false

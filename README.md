@@ -126,6 +126,19 @@ HTTPS_CACHE_URL="https://repo.openeuler.org/.../bcc-debuginfo-0.26.0-1.oe2303.aa
 
 仅需 Docker 命令行，无需 Kubernetes、云服务或特权网络。遇到问题见 `TROUBLESHOOTING.md`。
 
+## 扩展场景：BuildKit 经 Squid 代理+缓存（可选）
+
+验证容器镜像构建时 `RUN` 指令内的 HTTPS 请求经 BuildKit 内置代理链到 Squid，完成代理+缓存。
+**默认不随主套件运行**，通过独立入口触发：
+
+```bash
+./scripts/setup.sh          # 先起主 Squid HA 环境
+cd buildkit && ./run-tests.sh   # 运行 BuildKit 扩展测试(自动起停 buildkitd)
+```
+
+详见 `buildkit/README.md` 与 `buildkit/DESIGN.md`。依赖 BuildKit
+[PR #1](https://github.com/TommyLike/buildkit/pull/1)（`feature/upstream-proxy-config` 分支）。
+
 ## 用于生产部署
 
 本仓库是**测试验证环境**，部分配置为测试专用（如 `ssl_bump bump all`、单播 VRRP、DNS 硬编码），
