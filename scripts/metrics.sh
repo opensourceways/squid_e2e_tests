@@ -1,8 +1,8 @@
 #!/bin/bash
-# 分层性能指标采集 —— 只依赖两个已有数据源,不引入任何新组件:
-#   1) 各 Squid 的 access.log      (命中/字节/客户端/bump-splice)
+# 分层性能指标采集 —— 只依赖已有数据源,不引入任何新组件:
+#   1) 各 Squid 的 access.log      (命中/字节/客户端/延迟/错误分类/bump-splice)
 #   2) HAProxy stats CSV (:8404)   (后端分发/健康状态)
-#   3) cgroup cpu.stat             (CPU 秒,用于算每 GB 的 CPU 成本)
+#   3) cgroup cpu.stat             (CPU 秒,用于算两项 CPU 成本)
 #
 # 用法:
 #   ./scripts/metrics.sh baseline [秒]  # 测空闲 CPU 基线(零负载时跑一次,可复用)
@@ -13,6 +13,11 @@
 #
 # 为什么要按区间而不是看累计: 累计值会把预热、健康检查、历史负载混在一起,
 # 得出的命中率和 CPU 成本都没有意义。必须框定一个已知负载的窗口。
+#
+# 注意: 本脚本按窗口精确计算,适合测试与基准。生产用 Prometheus 抓取时代码不能直接搬
+# —— 分位数必须预先分桶(histogram),无法从计数器抓取值反算。可以搬的是这里的
+# **口径定义**(什么算一个请求、什么算命中、哪些行要排除),口径错了 Grafana 面板
+# 会和这里一样静默错掉。
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
@@ -20,6 +25,9 @@ cd "$ROOT"
 STATE="$ROOT/.metrics-state"
 BASELINE_FILE="$ROOT/.metrics-baseline"
 SQUIDS="squid1 squid2 squid3"
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
 
 # access.log 字段(squid 格式):
 #   $1 时间戳  $2 耗时ms  $3 客户端  $4 结果码/状态  $5 字节
@@ -37,6 +45,7 @@ $6 == "-" { next }          # HAProxy 健康检查
 #   splice: TCP_TUNNEL/... 带真实字节 —— 未解密直通,Squid 看不到内容,不可能命中。
 $6 == "CONNECT" {
     tunnel++
+    split($4, t, "/"); if (t[2]+0 >= 400) tunfail++
     if ($4 ~ /^TCP_TUNNEL/) { splice++; sbytes += $5 }
     else                     { bumped++ }
     next
@@ -48,10 +57,23 @@ $6 == "CONNECT" {
     if ($4 ~ /TCP_(MEM_)?HIT/)             { hit++;  hitb += $5 }
     else if ($4 ~ /TCP_(REFRESH|IMS)_HIT/) { rhit++; hitb += $5 }
     else                                    { miss++; missb += $5 }
+
+    # 错误分类 —— 关键是把「代理故障」和「源站故障」分开。
+    # 判据: Squid 自己生成的错误层级是 HIER_NONE(没真正连上源站),
+    #       真正到达源站再返回的错误层级是 HIER_DIRECT/HIER_*_PARENT 等。
+    # 为什么重要: 源站 404(比如包不存在)是正常现象,不该告警;
+    # k8s 压测里 120 并发有 31-37 个「失败」其实全是源站 404,不是 Squid 故障。
+    split($4, a, "/"); st = a[2] + 0
+    if ($4 ~ /ABORTED/)            aborted++       # 客户端中途断开
+    else if (st < 400)             ok++
+    else if ($9 ~ /^HIER_NONE/)    proxyerr++      # DNS/连接失败/拒绝 —— 该告警的是这个
+    else if (st >= 500)            origin5++
+    else                           origin4++
 }
 END {
-    printf "req=%d hit=%d rhit=%d miss=%d bytes=%d hitb=%d missb=%d bumped=%d splice=%d sbytes=%d tunnel=%d\n",
-           req, hit, rhit, miss, bytes, hitb, missb, bumped, splice, sbytes, tunnel
+    printf "req=%d hit=%d rhit=%d miss=%d bytes=%d hitb=%d missb=%d bumped=%d splice=%d sbytes=%d tunnel=%d tunfail=%d ok=%d origin4=%d origin5=%d proxyerr=%d aborted=%d\n",
+           req, hit, rhit, miss, bytes, hitb, missb, bumped, splice, sbytes, tunnel, tunfail,
+           ok, origin4, origin5, proxyerr, aborted
     for (c in cli) printf "CLIENT %s %d %d\n", c, clir[c], cli[c]
 }'
 
@@ -86,22 +108,35 @@ do_baseline() {
     echo "空闲基线: $(cat "$BASELINE_FILE") CPU秒/秒 (三副本合计) → $BASELINE_FILE"
 }
 
-# 汇总区间内的 access.log。$1=起始行(0 表示全部)
-collect() {
+# 把窗口内的 access.log 落到一个文件,后续多趟分析都读它(避免重复 docker exec)
+fetch_window() {
     local mode="$1"
+    : > "$WORK/log"
     for s in $SQUIDS; do
         local from=0
         [ "$mode" = "delta" ] && from=$(awk -v s="$s" '$1==s{print $2}' "$STATE" 2>/dev/null)
         from=${from:-0}
-        docker exec "$s" sh -c "tail -n +$((from + 1)) /var/log/squid/access.log" 2>/dev/null
-    done | awk "$AWK_AGG"
+        docker exec "$s" sh -c "tail -n +$((from + 1)) /var/log/squid/access.log" 2>/dev/null >> "$WORK/log"
+    done
+}
+
+# 最近秩分位。$1=数字文件 $2=百分位
+pct() {
+    local f="$1" p="$2" n
+    n=$(wc -l < "$f" 2>/dev/null || echo 0); n=${n:-0}
+    [ "$n" -eq 0 ] && { echo "n/a"; return; }
+    sort -n "$f" | awk -v p="$p" -v n="$n" 'BEGIN{i=int(p*n/100); if(i<1)i=1} NR==i{printf "%d", $1; exit}'
 }
 
 report() {
-    local mode="$1" out
-    out=$(collect "$mode")
-    local agg; agg=$(echo "$out" | grep -v '^CLIENT ')
-    eval "$(echo "$agg" | tr ' ' '\n' | sed 's/^/M_/')" 2>/dev/null
+    local mode="$1"
+    fetch_window "$mode"
+    local out; out=$(awk "$AWK_AGG" "$WORK/log")
+    eval "$(echo "$out" | grep -v '^CLIENT ' | tr ' ' '\n' | sed 's/^/M_/')" 2>/dev/null
+
+    # 延迟样本按命中结果分流(只取对象请求,排除健康检查与 CONNECT)
+    awk '$6 != "-" && $6 != "CONNECT" && $4 ~ /TCP_(MEM_)?HIT/ {print $2}' "$WORK/log" > "$WORK/lat_hit"
+    awk '$6 != "-" && $6 != "CONNECT" && $4 !~ /TCP_(MEM_|REFRESH_|IMS_)?HIT/ {print $2}' "$WORK/log" > "$WORK/lat_miss"
 
     local cpu_s=0 elapsed=0
     for s in $SQUIDS; do
@@ -117,7 +152,10 @@ report() {
 
     local req=${M_req:-0} hit=${M_hit:-0} rhit=${M_rhit:-0} miss=${M_miss:-0}
     local bytes=${M_bytes:-0} hitb=${M_hitb:-0} missb=${M_missb:-0}
-    local bumped=${M_bumped:-0} splice=${M_splice:-0} sbytes=${M_sbytes:-0} tunnel=${M_tunnel:-0}
+    local bumped=${M_bumped:-0} splice=${M_splice:-0} sbytes=${M_sbytes:-0}
+    local tunnel=${M_tunnel:-0} tunfail=${M_tunfail:-0}
+    local ok=${M_ok:-0} origin4=${M_origin4:-0} origin5=${M_origin5:-0}
+    local proxyerr=${M_proxyerr:-0} aborted=${M_aborted:-0}
 
     echo "============================================"
     echo "  分层性能指标  ($([ "$mode" = delta ] && echo "区间 ${elapsed}s" || echo "累计"))"
@@ -132,11 +170,27 @@ report() {
             printf "  请求数        %d  (HIT %d / REFRESH_HIT %d / MISS %d)\n", r, h, rh, m
             printf "  请求命中率    %.1f%%\n", (h+rh)*100/r
             printf "  字节命中率    %.1f%%   ← 省下的出向带宽看这个\n", (b>0? hb*100/b : 0)
-            printf "  服务字节      %.2f GB\n", b/1073741824
-            printf "  回源字节      %.2f GB\n", mb/1073741824
-            printf "  省下回源      %.2f GB\n", hb/1073741824
+            printf "  服务字节      %.2f GB   回源 %.2f GB   省下 %.2f GB\n",
+                   b/1073741824, mb/1073741824, hb/1073741824
         }'
     fi
+
+    echo ""
+    echo "── 延迟层: 按命中结果分位 (毫秒) ──"
+    printf "  %-6s n=%-6s p50=%-8s p95=%-8s p99=%s\n" "HIT" \
+        "$(wc -l < "$WORK/lat_hit" | tr -d ' ')" "$(pct "$WORK/lat_hit" 50)" "$(pct "$WORK/lat_hit" 95)" "$(pct "$WORK/lat_hit" 99)"
+    printf "  %-6s n=%-6s p50=%-8s p95=%-8s p99=%s\n" "MISS" \
+        "$(wc -l < "$WORK/lat_miss" | tr -d ' ')" "$(pct "$WORK/lat_miss" 50)" "$(pct "$WORK/lat_miss" 95)" "$(pct "$WORK/lat_miss" 99)"
+    echo "  MISS 延迟 ≈ 源站延迟 + 代理开销(受源站带宽支配); HIT 延迟才是缓存真正买到的东西。"
+    echo "  看均值会被长尾骗过去 —— 对在线业务 p99 才是用户实际感受。"
+
+    echo ""
+    echo "── 错误层: 代理故障 vs 源站故障 ──"
+    printf "  成功(2xx/3xx) %-6s 源站4xx %-6s 源站5xx %-6s 代理故障 %-6s 客户端中断 %s\n" \
+        "$ok" "$origin4" "$origin5" "$proxyerr" "$aborted"
+    [ "$tunfail" -gt 0 ] && echo "  隧道失败      $tunfail (CONNECT 阶段即失败)"
+    echo "  源站 4xx 多半是包不存在等正常现象,不应告警;"
+    echo "  「代理故障」才是要告警的(HIER_NONE 且 >=400: DNS/连接失败/ACL 拒绝)。"
 
     echo ""
     echo "── SSL Bump 层: CPU 成本 (两项模型) ──"
