@@ -5,18 +5,20 @@
 #   3) cgroup cpu.stat             (CPU 秒,用于算每 GB 的 CPU 成本)
 #
 # 用法:
-#   ./scripts/metrics.sh begin     # 打基线
+#   ./scripts/metrics.sh baseline [秒]  # 测空闲 CPU 基线(零负载时跑一次,可复用)
+#   ./scripts/metrics.sh begin          # 打基线
 #   <跑你的负载>
-#   ./scripts/metrics.sh end       # 输出这段区间的分层指标
-#   ./scripts/metrics.sh now       # 不打基线,直接看累计值
+#   ./scripts/metrics.sh end            # 输出这段区间的分层指标
+#   ./scripts/metrics.sh now            # 不打基线,直接看累计值
 #
 # 为什么要按区间而不是看累计: 累计值会把预热、健康检查、历史负载混在一起,
-# 得出的命中率和 CPU/GB 都没有意义。必须框定一个已知负载的窗口。
+# 得出的命中率和 CPU 成本都没有意义。必须框定一个已知负载的窗口。
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT"
 STATE="$ROOT/.metrics-state"
+BASELINE_FILE="$ROOT/.metrics-baseline"
 SQUIDS="squid1 squid2 squid3"
 
 # access.log 字段(squid 格式):
@@ -68,6 +70,20 @@ do_begin() {
     for s in $SQUIDS; do echo "$s $(log_lines "$s") $(cpu_usec "$s")" >> "$STATE"; done
     echo "TS $(date +%s)" >> "$STATE"
     echo "基线已记录 ($STATE)。跑完负载后执行: ./scripts/metrics.sh end"
+    [ -f "$BASELINE_FILE" ] || echo "提示: 尚未测空闲基线,CPU 归因会偏高。先跑一次 $0 baseline"
+}
+
+# 空闲 CPU 基线。Squid 即使零流量也在烧 CPU: 健康检查(每3秒×3后端×2节点)、
+# 日志写入、缓存索引维护。窗口越稀疏(比如里面有大量 docker run 启动等待时间),
+# 这部分占比越高 —— 实测能占到测量值的三分之一,不扣掉会把 CPU 成本显著高估。
+do_baseline() {
+    local secs=${1:-60} a=0 b=0
+    echo "测量空闲基线 ${secs}s —— 请确保这段时间内没有任何负载 ..."
+    for s in $SQUIDS; do a=$(awk -v x="$a" -v y="$(cpu_usec "$s")" 'BEGIN{print x+y}'); done
+    sleep "$secs"
+    for s in $SQUIDS; do b=$(awk -v x="$b" -v y="$(cpu_usec "$s")" 'BEGIN{print x+y}'); done
+    awk -v a="$a" -v b="$b" -v t="$secs" 'BEGIN{printf "%.6f\n", (b-a)/1000000/t}' > "$BASELINE_FILE"
+    echo "空闲基线: $(cat "$BASELINE_FILE") CPU秒/秒 (三副本合计) → $BASELINE_FILE"
 }
 
 # 汇总区间内的 access.log。$1=起始行(0 表示全部)
@@ -123,19 +139,37 @@ report() {
     fi
 
     echo ""
-    echo "── SSL Bump 层: CPU 成本 ──"
+    echo "── SSL Bump 层: CPU 成本 (两项模型) ──"
     awk -v b="$bumped" -v sp="$splice" -v sb="$sbytes" -v t="$tunnel" 'BEGIN{
         printf "  隧道 %d 条: 解密(bump) %d / 直通(splice) %d", t, b, sp
         if (sp > 0) printf "  直通字节 %.2f GB(不可能命中)", sb/1073741824
         printf "\n"
     }'
-    awk -v c="$cpu_s" -v b="$bytes" 'BEGIN{
-        printf "  CPU 合计      %.2f 秒 (三副本)\n", c
-        if (b > 0) printf "  每 GB CPU     %.2f 秒/GB   ← 容量推导的关键系数\n", c/(b/1073741824)
-        else       printf "  每 GB CPU     n/a (无流量)\n"
+    local base_rate=0
+    [ -f "$BASELINE_FILE" ] && base_rate=$(cat "$BASELINE_FILE" 2>/dev/null || echo 0)
+    awk -v c="$cpu_s" -v br="${base_rate:-0}" -v e="$elapsed" -v b="$bytes" -v r="$req" -v hasb="$([ -f "$BASELINE_FILE" ] && echo 1 || echo 0)" 'BEGIN{
+        idle = br * e
+        attr = c - idle; if (attr < 0) attr = 0
+        if (hasb) printf "  CPU 原始 %.2f 秒 − 空闲基线 %.2f 秒 = 归因 %.2f 秒\n", c, idle, attr
+        else      printf "  CPU 原始 %.2f 秒 (未扣空闲基线,偏高; 先跑一次 baseline)\n", c
+        if (r > 0) {
+            printf "  平均对象      %.2f MB\n", (b/r)/1048576
+            printf "  每请求 CPU    %.4f 秒/请求   ← 固定成本: TLS 握手 + 证书生成 + 查找\n", attr/r
+        }
+        if (b > 0)
+            printf "  每 GB CPU     %.2f 秒/GB      ← 边际成本: 加密 + I/O\n", attr/(b/1073741824)
     }'
-    echo "  注意: 纯 HIT 场景 CPU 高于纯 MISS(命中要重新做 TLS 加密,回源只是等 I/O)。"
-    echo "        要拿到可用的系数,请分别跑「纯 HIT」与「纯 MISS」两个窗口再比较。"
+    cat <<'NOTE'
+  ⚠ 「每 GB CPU」不是常数,它随对象大小变化 —— CPU 由「每请求固定成本」和
+     「每字节边际成本」两项构成,对象越小,固定成本被摊到的字节越少,该值越高。
+     实测同一套环境: 14MB 对象约 28 秒/GB,58KB-6MB 混合约 37-44 秒/GB。
+     容量估算请用两项模型:
+         核数 ≈ 请求速率 × 每请求CPU + 吞吐(GB/s) × 每GB CPU
+     要拟合这两项,需要在不同对象大小/并发下各跑一个窗口,再比较。
+  ⚠ 低并发下测不出「HIT 比 MISS 更吃 CPU」—— 那是 N=120 量级 TLS 批量加密打满
+     CPU 时才出现的效应(见 reports/stress-benchmark-20260811.md)。低并发时开销
+     主要在握手与证书生成,不要用小样本去推翻高并发结论。
+NOTE
 
     echo ""
     echo "── HAProxy 层: 分发与健康 ──"
@@ -155,8 +189,9 @@ report() {
 }
 
 case "${1:-now}" in
-    begin) do_begin ;;
-    end)   [ -f "$STATE" ] || { echo "没有基线,先跑 ./scripts/metrics.sh begin"; exit 1; }; report delta ;;
-    now)   report full ;;
-    *)     echo "用法: $0 {begin|end|now}"; exit 1 ;;
+    baseline) do_baseline "${2:-60}" ;;
+    begin)    do_begin ;;
+    end)      [ -f "$STATE" ] || { echo "没有基线,先跑 ./scripts/metrics.sh begin"; exit 1; }; report delta ;;
+    now)      report full ;;
+    *)        echo "用法: $0 {baseline [秒]|begin|end|now}"; exit 1 ;;
 esac
