@@ -91,18 +91,57 @@ docker push tommylike/squid-sslbump:latest
 - **memory limit 留 SSL 余量**：防 SSL Bump OOMKilled（§6.5）
 - **磁盘 LFUDA / 内存 GDSF + maximum_object_size 4GB**：大文件省字节带宽（§2.3）
 
+## 多副本 HA 测试（ha-test.sh）
+
+把根目录 **Docker Compose 的 6 个 HA 场景移植到 K8s**：多副本 + Service 访问 + `kubectl delete pod` 故障注入。
+编排层从 keepalived+HAProxy 换成 K8s 原生 Service（见根 `solution.md` / sizing 报告选型讨论）。
+
+```bash
+export KUBECONFIG=../.config/test-husheng-kubeconfig.yaml
+./ha-test.sh test     # 部署 3 副本 Deployment + 跑 6 场景
+./ha-test.sh clean    # 清理
+```
+
+用 **Deployment + emptyDir**（非 StatefulSet+PVC）：3 副本可自由调度到不同节点，
+避开 csi-disk 的 AZ 绑定限制；HA 故障切换不依赖持久缓存。
+
+### 场景映射（Docker HA → K8s HA）
+
+| # | 原 Docker 场景 (`tests/`) | K8s 等价 (`ha-test.sh`) |
+|---|---------------------------|-------------------------|
+| 01 | 基础代理 | HTTP/HTTPS 经 **Service** |
+| 02 | 单 Squid 故障 | `kubectl delete pod` → Service 继续 |
+| 03 | VIP 漂移(keepalived) | **逐个删全部 Pod → Service 端点始终 ≥1**(无 VIP 概念) |
+| 04 | HTTPS 缓存 | MISS→HIT 经 Service |
+| 05 | 下载中断 | 下载中删 Pod → Service 继续 |
+| 06 | 双 Squid 故障 | 删 2 Pod 仅剩 1 → 连续请求 200 |
+
+| Docker(keepalived+HAProxy) | K8s(原生) |
+|---------------------------|-----------|
+| VIP(keepalived) | Service ClusterIP(永不宕) |
+| HAProxy 健康检查摘除 | readinessProbe → kube-proxy 更新 endpoint |
+| `docker stop` | `kubectl delete pod --force` |
+| `balance source` | Service `sessionAffinity: ClientIP` |
+
+> **两套并存**：物理机/VM 用根目录 Docker Compose 那套(`tests/`)；云原生用本目录 K8s 这套。
+> 核心资产(squid.conf / SSL Bump / 缓存策略)两套复用。实测 8 断言全通过(2026-08-11)。
+
 ## 目录
 
 ```
 k8s/
 ├── README.md
-├── deploy.sh / test.sh / cleanup.sh
-├── docker/            ← squid-sslbump 镜像(Dockerfile + start.sh)
+├── deploy.sh / test.sh / test-concurrent.sh / cleanup.sh
+├── ha-test.sh                    ← 多副本 HA 测试(6 场景, kill pod)
+├── stress.sh / stress-campaign.sh ← 上限压测
+├── docker/                       ← squid-sslbump 镜像(Dockerfile + start.sh)
 └── manifests/
     ├── 00-namespace.yaml
-    ├── 01-configmap.yaml     ← squid.conf(测试规格)
-    ├── 02-service.yaml       ← headless + ClientIP 亲和
-    └── 03-statefulset.yaml   ← 3 副本 + PVC + 三探针 + 反亲和
+    ├── 01-configmap.yaml         ← squid.conf(测试规格)
+    ├── 02-service.yaml           ← headless + ClientIP 亲和
+    ├── 03-statefulset.yaml       ← 3 副本 + PVC + 三探针 + 反亲和(持久缓存)
+    ├── ha-deployment.yaml        ← 3 副本 Deployment + Service(emptyDir, HA 测试)
+    └── stress-*.yaml             ← 压测用(deployment/client/random)
 ```
 
 ## 从测试规格到生产

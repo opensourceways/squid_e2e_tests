@@ -1,0 +1,92 @@
+# K8s HA 测试部署 —— 3 副本 Deployment + emptyDir(自由调度,避开 csi-disk AZ 限制)
+# 对应原 Docker Compose 的 3×Squid,但 HA 由 Service 提供(替代 keepalived+HAProxy)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: squid-ha
+  namespace: test-husheng
+  labels:
+    app: squid-ha
+spec:
+  type: ClusterIP
+  selector:
+    app: squid-ha
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: 3128
+  # 客户端 IP 亲和(等价 HAProxy balance source, 缓存去重)
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: squid-ha
+  namespace: test-husheng
+  labels:
+    app: squid-ha
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: squid-ha
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0     # 保证容量不降(HA 关键)
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: squid-ha
+    spec:
+      # 反亲和: 3 副本尽量分散到不同节点(单节点故障不带走多副本)
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: squid-ha
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: squid
+          image: tommylike/squid-sslbump:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3128
+          resources:
+            requests: { cpu: "250m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "1Gi" }
+          volumeMounts:
+            - name: cache
+              mountPath: /var/spool/squid
+            - name: squid-config
+              mountPath: /etc/squid/squid.conf
+              subPath: squid.conf
+            - name: squid-ca
+              mountPath: /etc/squid/certs
+              readOnly: true
+          # readiness 驱动 Service 端点: 未就绪即从 Service 摘除(等价 HAProxy 健康检查)
+          readinessProbe:
+            tcpSocket: { port: 3128 }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            tcpSocket: { port: 3128 }
+            periodSeconds: 10
+            failureThreshold: 3
+      volumes:
+        - name: cache
+          emptyDir: {}
+        - name: squid-config
+          configMap:
+            name: squid-config      # 复用主部署的 ConfigMap
+        - name: squid-ca
+          secret:
+            secretName: squid-ca
