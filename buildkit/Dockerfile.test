@@ -1,0 +1,8 @@
+# 测试镜像: RUN 内通过 HTTPS 下载 openEuler RPM
+# 验证该 HTTPS 请求经 BuildKit 内置代理 → Squid → 缓存
+# 注: FROM 基础镜像层不走代理(按决策 A 不测),此处用小基础镜像
+FROM alpine:3.20
+RUN apk add --no-cache curl
+# 关键: HTTPS 下载,经 BuildKit MITM 代理 → Squid SSL Bump 缓存
+ARG RPM_URL
+RUN curl -fsSL -o /tmp/pkg.rpm "$RPM_URL" && ls -la /tmp/pkg.rpm
