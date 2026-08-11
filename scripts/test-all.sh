@@ -17,16 +17,21 @@ cd "$ROOT"
 PASS=0; FAIL=0
 JSON_ITEMS=()
 
+# 恢复完整环境: 用 compose restart(而非 docker start)以确保 keepalived 复活
+restore_env() {
+    docker compose restart squid1 squid2 squid3 haproxy-node1 haproxy-node2 >/dev/null 2>&1
+    sleep 15
+}
+
 for t in tests/[0-9]*.sh; do
     tname=$(basename "$t")
 
-    # 每个测试前确保代理可达(上个测试可能残留停止的节点)
+    # 每个测试前确保代理可达(上个测试若中途 FAIL 可能残留停止的容器)
     if ! docker run --rm --network haproxy_ha_squid_net alpine/curl:latest \
         curl -s -o /dev/null --max-time 5 -x http://172.30.0.100:3128 \
         http://repo.openeuler.org/ 2>/dev/null; then
-        echo "  代理不可达,尝试恢复环境..." | tee -a "$REPORT"
-        docker start haproxy-node1 haproxy-node2 squid1 squid2 squid3 2>/dev/null
-        sleep 15
+        echo "  代理不可达,恢复环境..." | tee -a "$REPORT"
+        restore_env
     fi
 
     echo "--- $tname ---"
@@ -42,6 +47,9 @@ for t in tests/[0-9]*.sh; do
         echo "  [$tname] FAIL (exit=$code, ${dur}s)" | tee -a "$REPORT"
         FAIL=$((FAIL+1))
         JSON_ITEMS+=("{\"test\":\"$tname\",\"result\":\"FAIL\",\"exit_code\":$code,\"duration_s\":$dur}")
+        # 测试中途失败可能残留停止的容器,主动恢复以隔离后续测试
+        echo "  测试失败,恢复环境..." | tee -a "$REPORT"
+        restore_env
     fi
 done
 

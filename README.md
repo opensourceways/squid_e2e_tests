@@ -37,6 +37,7 @@ git clone https://github.com/opensourceways/squid_e2e_tests.git && cd squid_e2e_
 ├── README.md                    ← 本文件
 ├── AGENTS.md                    ← 给其他 agent 的入口说明
 ├── solution.md                  ← 方案选型与架构设计
+├── PRODUCTION.md                ← 生产部署指南(测试↔生产配置差异)
 ├── test.md                      ← 测试策略与用例
 ├── TROUBLESHOOTING.md           ← 已知问题与踩坑记录
 ├── docker-compose.yml           ← 5 容器基础设施定义
@@ -124,3 +125,8 @@ HTTPS_CACHE_URL="https://repo.openeuler.org/.../bcc-debuginfo-0.26.0-1.oe2303.aa
 | bash | 脚本 | 4+ |
 
 仅需 Docker 命令行，无需 Kubernetes、云服务或特权网络。遇到问题见 `TROUBLESHOOTING.md`。
+
+## 用于生产部署
+
+本仓库是**测试验证环境**，部分配置为测试专用（如 `ssl_bump bump all`、单播 VRRP、DNS 硬编码），
+**不可直接搬到生产**。生产部署的关键配置、测试↔生产差异、必改项清单见 **`PRODUCTION.md`**。
