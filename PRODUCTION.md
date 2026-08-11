@@ -26,9 +26,11 @@
 
 ```
 vrrp_script chk_haproxy {
-    script "/usr/bin/killall -0 haproxy"   # 建议用完整路径
+    script "/usr/bin/pkill -0 -x haproxy"  # pkill 来自 procps;killall 来自 psmisc,
+                                           # 后者常常只是别的包的 Recommends,容易缺失
     interval 2
-    weight -20                             # HAProxy 挂掉时降优先级触发漂移
+    weight -20                             # 必须 -20: priority 100-10=90 与 BACKUP 的 90
+                                           # 相等,VRRP 平级不抢占,VIP 根本不会漂移
     fall 2
     rise 2
 }
@@ -96,6 +98,8 @@ http_port 3128 ssl-bump \
 sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/spool/squid/ssl_db -M 20MB
 
 # 生产: 只解密需要缓存的域名,其余 splice(直通,不解密)
+# `step1` 不是内置 ACL,必须先定义,否则 squid -k parse 直接报错
+acl step1 at_step SslBump1
 acl cacheable_sites ssl::server_name .repo.openeuler.org .example.com
 ssl_bump peek step1
 ssl_bump bump cacheable_sites

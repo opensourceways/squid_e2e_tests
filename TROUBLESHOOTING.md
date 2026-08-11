@@ -26,7 +26,26 @@
 
 **根因**：HAProxy 配置含 `daemon` 关键字或默认 fork 到后台，主进程退出→容器结束。
 
-**解法**：`configs/haproxy/haproxy.cfg` **不写 `daemon`**，`start.sh` 用 `haproxy -d` 前台运行。
+**解法**：`configs/haproxy/haproxy.cfg` **不写 `daemon`**，`start.sh` 用 `haproxy -db` 前台运行。
+
+> ⚠️ 是 `-db` 不是 `-d`。`-d` 是 **debug 模式**，会逐连接打印调试信息，高流量下日志量极大；
+> `-db` 才是「前台运行 + 不 daemonize」。两者都能让容器不退出，所以这个错误很容易被忽略。
+
+## 3b. HAProxy 启动即报 fdtab 分配失败
+
+**现象**：容器 `Exited (1)`，日志：
+```
+[ALERT] Not enough memory to allocate 1073741815 entries for fdtab!
+[ALERT] No polling mechanism available.
+```
+
+**根因**：`haproxy.cfg` 的 `global` 段没有 `maxconn`。HAProxy 会从 `RLIMIT_NOFILE` 推导，
+而 Docker 默认 `LimitNOFILE=infinity`（容器内 `ulimit -n` = 1073741816），
+推导出 `maxconn` ≈ 5.4 亿，分配 fdtab 直接失败。
+
+**是否触发取决于宿主机的 ulimit**——在软限制较小的机器上不会复现，所以容易漏掉。
+
+**解法**：`configs/haproxy/haproxy.cfg` 的 `global` 段显式写 `maxconn 20000`。
 
 ## 4. Squid 解析域名得到内网 IP（503）
 
