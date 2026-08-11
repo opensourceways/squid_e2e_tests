@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: squid-config
+  namespace: {{ .Values.namespace }}
+data:
+  squid.conf: |
+    # ── 监听端口 + SSL Bump ──
+    http_port 3129 ssl-bump \
+      cert=/etc/squid/ssl_cert/squid-ca-bundle.pem \
+      generate-host-certificates=on \
+      dynamic_cert_mem_cache_size=8MB \
+      tls-min-version=1.0 \
+      tls-cipher=DEFAULT:@SECLEVEL=0
+
+    visible_hostname squid-cache
+
+    # ── SSL 证书生成器 ──
+    sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/cache/squid-ssl-db -M 8MB
+    sslcrtd_children 8 startup=1 idle=1
+
+    # ── SSL Bump 规则 ──
+    acl step1 at_step SslBump1
+
+    acl registry ssl::server_name swr.cn-north-4.myhuaweicloud.com
+    acl registry ssl::server_name swr.cn-southwest-2.myhuaweicloud.com
+    acl registry ssl::server_name registry-1.docker.io auth.docker.io
+    acl registry ssl::server_name registry.k8s.io ghcr.io gcr.io quay.io
+
+    ssl_bump peek step1
+    ssl_bump splice registry
+    ssl_bump bump all
+
+    # ── 访问控制 ──
+    acl localnet src all
+    http_access allow localnet
+    http_access deny all
+
+    # ── §4.3 registry 缓存 peer（同 Pod 的 rpardini sidecar，localhost:3128）──
+    cache_peer 127.0.0.1 parent 3128 0 no-query no-digest name=registryproxy
+    cache_peer_access registryproxy allow registry
+    cache_peer_access registryproxy deny all
+    never_direct allow registry
+
+    # ── 缓存配置 ──
+    cache_mem {{ .Values.squid.cacheMemory }} MB
+    maximum_object_size_in_memory 512 KB
+    cache_dir ufs /var/spool/squid {{ .Values.squid.cacheDiskSize }} 16 8
+    maximum_object_size {{ .Values.squid.maxObjectSize }} MB
+
+    # ── 缓存策略 ──
+    refresh_pattern -i \.whl$  10080 100% 525960 ignore-reload override-expire ignore-no-cache
+    refresh_pattern -i \.tar\.gz$ 10080 100% 525960 ignore-reload override-expire ignore-no-cache
+    refresh_pattern -i \.deb$  10080 100% 525960 ignore-reload override-expire ignore-no-cache
+    refresh_pattern -i repo\.huaweicloud\.com/.*/simple/ 0 20% 4320 ignore-private ignore-reload override-vary
+    refresh_pattern -i mirrors\.tuna\.tsinghua\.edu\.cn/.*/simple/ 0 20% 4320 ignore-private ignore-reload override-vary
+    refresh_pattern -i .pypi.org/.* 0 20% 4320 ignore-private
+    refresh_pattern -i .pythonhosted.org/.* 0 20% 4320 ignore-private
+    refresh_pattern -i .golang.org/.* 0 20% 4320 ignore-private
+    refresh_pattern -i proxy.golang.org/.* 0 20% 4320 ignore-private
+    refresh_pattern -i .docker.io/.* 0 20% 4320 ignore-private
+    refresh_pattern -i .debian.org/.* 0 20% 4320 ignore-private
+    refresh_pattern -i .ubuntu.com/.* 0 20% 4320 ignore-private
+    refresh_pattern . 0 20% 4320
+
+    # ── 响应头处理（消除 Vary: Origin 导致的缓存 miss）──
+    reply_header_replace Vary Accept-Encoding
+
+    # ── 日志（tail -F → kubectl logs 可见）──
+    access_log daemon:/var/log/squid/access.log
+    cache_log /var/log/squid/cache.log
+    cache_store_log none
+
+    pid_filename /var/run/squid/squid.pid
+
+    # ── 超时设置（支持 5GB+ 大镜像下载）──
+    read_timeout 30 minutes
+    write_timeout 30 minutes
+    connect_timeout 2 minutes
+    request_timeout 10 minutes
+
+    # ── 禁止 quick_abort（防大文件传输中途截断）──
+    quick_abort_min -1 KB
+    quick_abort_max -1 KB
+    quick_abort_pct 95
