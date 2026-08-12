@@ -147,6 +147,58 @@ cd buildkit && ./run-tests.sh   # 运行 BuildKit 扩展测试(自动起停 buil
 详见 `buildkit/README.md` 与 `buildkit/DESIGN.md`。依赖 BuildKit
 [PR #1](https://github.com/TommyLike/buildkit/pull/1)（`feature/upstream-proxy-config` 分支）。
 
+## 分层性能指标
+
+`scripts/metrics.sh` 按区间采集分层指标,只依赖已有数据源(各 Squid 的 `access.log`、
+HAProxy stats CSV、cgroup `cpu.stat`),不引入任何新组件:
+
+```bash
+./scripts/metrics.sh baseline  # 零负载时跑一次,测空闲 CPU 基线(可复用)
+./scripts/metrics.sh begin     # 打基线
+<跑你的负载>
+./scripts/metrics.sh end       # 输出这段区间的分层指标
+```
+
+输出四层:**Squid**(请求/字节命中率、省下的回源字节)、**SSL Bump**(bump/splice 隧道数、
+CPU 两项成本)、**HAProxy**(后端分发、健康、检查失败)、**归因**(按客户端的请求数与字节数)。
+
+三个采集上的坑,脚本里已经处理:
+
+- **必须框定区间**。累计值会把预热、健康检查、历史负载混在一起,命中率和 CPU/GB 都没有意义。
+- **健康检查要剔除**。每 3 秒 × 3 后端 × 2 节点,不滤掉会把请求数和命中率彻底冲淡
+  (日志里是 `NONE_NONE/400`、方法为 `-`)。
+- **CONNECT 隧道不是对象请求**。`bump` 的 CONNECT 记录是 `NONE_NONE/200 bytes=0`,
+  只是建隧道,真正的负载会作为解密后的 `GET https://...` 再记一行;混进去会凭空翻倍
+  请求数并稀释命中率。`splice` 则相反,是 `TCP_TUNNEL` 带真实字节且不可能命中。
+
+> **归因层需要 PROXY protocol**。HAProxy 是 TCP 模式转发,默认情况下 Squid 看到的客户端
+> 永远是 HAProxy 节点,按 worker/job 的归因做不出来。脚本会在检测到这种情况时给出提示。
+
+### 关于「命中率」不是唯一指标
+
+合并进来的 K8s 压测数据(`reports/stress-benchmark-20260811.md`)显示:N=120 时
+**纯 HIT 比纯 MISS 更吃 CPU**(199m vs 88m),HIT 反而更慢(104s vs 67s)——
+因为命中要对内容重新做 TLS 加密,而回源只是在等被限速的源站。
+所以只看命中率会得出错误的扩容结论,还必须看 CPU 成本。
+
+### CPU 成本是两项,不是一个「每 GB」常数
+
+CPU 消耗 = **每请求固定成本**(TLS 握手、证书生成、缓存查找)+ **每字节边际成本**(加密、I/O)。
+只报「每 GB CPU」会把固定成本摊进字节里,于是同一套环境下这个数会随对象大小漂移 ——
+实测 14MB 对象约 28 秒/GB,而 58KB–6MB 混合约 37–44 秒/GB,相差 1.6 倍。
+
+容量估算要用两项模型:
+
+```
+核数 ≈ 请求速率 × 每请求CPU + 吞吐(GB/s) × 每GB CPU
+```
+
+要拟合这两项,需要在**不同对象大小/并发**下各跑一个窗口再比较,单个窗口拟合不出来。
+
+另外必须先跑 `metrics.sh baseline`:Squid 零流量时也在烧 CPU(健康检查每 3 秒 × 3 后端 × 2 节点、
+日志写入、缓存索引维护)。窗口越稀疏——比如里面有大量 `docker run` 启动等待——这部分占比越高,
+实测能占到测量值的三分之一。不扣掉会显著高估 CPU 成本,也会让两个窗口之间的比较失去意义。
+
 ## 其他部分
 
 | 部分 | 位置 | 说明 |
