@@ -1,0 +1,80 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: pvc-perf-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: pvc-perf
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 3600
+  tasks:
+    - name: pvc-perf
+      replicas: 1
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+              command:
+                - bash
+                - -c
+              args:
+                - |
+                  #!/bin/bash
+                  set -e
+                  echo "== pvc-perf task: $(hostname) =="
+                  sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.huaweicloud.com/ubuntu-ports|g' \
+                    /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
+                  apt-get update -qq 2>&1 | tail -1 || true
+                  apt-get install -y -qq python3 python3-pip 2>&1 | tail -1 || \
+                    { apt-get update -qq 2>&1 | tail -1 || true; apt-get install -y -qq python3 python3-pip 2>&1 | tail -1; }
+
+                  T_START=$(date +%s%3N)
+                  echo ""
+                  echo "=== PERF: pip download fixed package set via squid ==="
+                  mkdir -p /tmp/wheels
+                  pip download --no-deps --no-cache-dir \
+                    --index-url https://repo.huaweicloud.com/repository/pypi/simple \
+                    -d /tmp/wheels \
+                    pyyaml setuptools auditwheel \
+                    numpy psutil requests tqdm regex pygments flask fastapi pydantic \
+                    torch==2.10.0 \
+                    > /tmp/pip.log 2>&1 || { tail -5 /tmp/pip.log >&2; exit 1; }
+                  T_END=$(date +%s%3N)
+                  BYTES=$(du -sb /tmp/wheels 2>/dev/null | awk '{print $1}')
+                  COUNT=$(ls /tmp/wheels 2>/dev/null | wc -l)
+                  MS=$((T_END - T_START))
+                  echo "PERF_BYTES=$BYTES"
+                  echo "PERF_COUNT=$COUNT"
+                  echo "PERF_MS=$MS"
+                  if [ "${BYTES:-0}" -gt 0 ] && [ "$MS" -gt 0 ]; then
+                    echo "PERF_BW_BPS=$(( BYTES * 1000 / MS ))"
+                  fi
+                  echo "== done $(hostname) =="
+              lifecycle:
+                postStart:
+                  exec:
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set +e
+                        P=/etc/squid-ca/squid-ca.pem
+                        if [ -f "$P" ]; then
+                          if [ -d /etc/pki/ca-trust/source/anchors ]; then      # RHEL/openEuler
+                            cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                            update-ca-trust extract >/dev/null 2>&1
+                          else                                                   # Debian/Ubuntu
+                            cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                            update-ca-certificates -f >/dev/null 2>&1
+                          fi
+                        fi
+                        true
