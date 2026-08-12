@@ -31,8 +31,9 @@ squid-cache.squid:9301 (squid-exporter, 双活各一个)
 ### 2.2 关键教训：ConfigMap 更新 ≠ 自动生效
 
 agent 运行配置**不会**随 ConfigMap 自动加载。修改
-`monitoring/config-for-guiyang-006/prometheus-agent-configmap-patch.yaml` 并 apply 后，
-必须热加载：
+[`github.com/opensourceways/ascend-ci-deployment`](https://github.com/opensourceways/ascend-ci-deployment)
+仓库的 `monitoring/config-for-guiyang-006/prometheus-agent-configmap-patch.yaml`
+并 apply 后，必须热加载：
 
 ```bash
 kubectl -n monitoring exec <prometheus-agent-pod> -- \
@@ -44,6 +45,41 @@ kubectl -n monitoring exec <prometheus-agent-pod> -- \
 ```
 
 agent 参数已带 `--web.enable-lifecycle`，`/-/reload` 直接可用。
+
+> 注意：ConfigMap 卷在 kubelet 侧同步有延迟（实测 >3min 未同步）。
+> **直接 `kubectl -n monitoring rollout restart deploy/prometheus-agent` 最可靠**——重启即加载最新配置，替代 reload。
+
+### 2.4 双活采样修正：headless 每副本 target（2026-08-12）
+
+**问题**：squid job 原 target 是 Service `squid-cache.squid:9301` → kube-proxy 轮询两个 pod。
+agent 的 keep-alive 连接把样本粘在 pod-0（series 单调无反转），但**连接一旦断开重连**
+可能落到 pod-1 → 同一 series 的 counter 跳变（每 pod 独立 counter），`rate()` 全错。
+
+**修复**（ascend-ci-deployment commit `0daf930b`，同一 configmap-patch 文件）：
+改为 StatefulSet headless DNS 每副本独立 target：
+
+```yaml
+- job_name: squid
+  static_configs:
+  - targets:
+    - squid-cache-0.squid-cache-headless.squid:9301
+    - squid-cache-1.squid-cache-headless.squid:9301
+```
+
+**验证**（中央 113.44.182.82）：
+
+```
+squid-cache-0.squid-cache-headless.squid:9301 → 45845   ← pod-0 独立 counter
+squid-cache-1.squid-cache-headless.squid:9301 → 45570   ← pod-1 独立 counter
+（旧 Service series 5min 后自动过期）
+```
+
+聚合查询（集群总量）：
+
+```promql
+sum(rate(squid_client_http_requests_total{job="squid"}[5m]))        # 双副本合计
+sum by (instance) (squid_client_http_requests_total{job="squid"})   # 分副本
+```
 
 ### 2.3 实测指标（2026-08-11，squid-cache-0 部署约 1h）
 
