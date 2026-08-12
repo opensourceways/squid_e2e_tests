@@ -20,6 +20,8 @@ spec:
       maxRetry: 1
       template:
         spec:
+          nodeSelector:
+            kubernetes.io/arch: arm64
           containers:
             - name: test
               image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
@@ -103,3 +105,25 @@ spec:
                   value: "localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
                 - name: no_proxy
                   value: "localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+                - name: SSL_CERT_FILE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: CURL_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: REQUESTS_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: PIP_CERT
+                  value: /etc/squid-ca/squid-ca.pem
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true

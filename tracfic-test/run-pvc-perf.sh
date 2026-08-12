@@ -59,7 +59,7 @@ submit_ramp() {
 }
 
 wait_ramp() { # job → rc
-  local job="$1" pod done=0 seen=0 end=$(( $(date +%s) + 900 ))
+  local job="$1" pod done=0 seen=0 end=$(( $(date +%s) + 1800 ))
   while [ "$(date +%s)" -lt "$end" ]; do
     done=1; seen=0
     for pod in $(kc get pods -n "$NS" -l "volcano.sh/job-name=$job" -o name 2>/dev/null | cut -d/ -f2); do
@@ -78,12 +78,21 @@ wait_ramp() { # job → rc
 }
 
 run_level() {
-  local n="$1" tag="$2"
-  echo "" | tee -a "$OUT"
-  echo "== concurrency=$n ($tag) $(date -u +%T)Z ==" | tee -a "$OUT"
-  local job
-  job=$(submit_ramp "$n") || return 1
-  wait_ramp "$job" || return 1
+  local n="$1" tag="$2" attempt=0 run_id="pvc-perf-$n"
+  while :; do
+    attempt=$((attempt+1))
+    echo "" | tee -a "$OUT"
+    echo "== concurrency=$n ($tag, attempt $attempt) $(date -u +%T)Z ==" | tee -a "$OUT"
+    local job
+    job=$(submit_ramp "$n") || { echo "  submit failed" | tee -a "$OUT"; break; }
+    if wait_ramp "$job"; then
+      break
+    fi
+    echo "  attempt $attempt failed" | tee -a "$OUT"
+    kc delete vj -l pipeline/run-id=$run_id -n $NS --ignore-not-found >/dev/null 2>&1 || true
+    [ "$attempt" -ge 2 ] && { echo "  giving up on level $n" >&2; return 1; }
+    sleep 30
+  done
   sleep 5
   local nbytes=0 bytes ms bw_sum=0 pod byte_wall=0 pod_bytes=0 bps=0
   local i=0 cnt=0
