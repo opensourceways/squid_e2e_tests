@@ -1,4 +1,8 @@
-# squid-rpardini 部署方法与 CI 注入指南
+# deploy — Squid 生产部署方法与 CI 注入指南
+
+> **本目录（`deploy/`）是仓库里"实际部署形态"的一份留档**：架构、chart、values、验证记录。
+> 修改前请对照 `DEPENDENCIES.md` 了解它当前对外部环境（CA/私有镜像/StorageClass/Vault/监控）的耦合。
+> 生产 Helm release 名与 chart name 仍为 `squid-rpardini`（与 `ascend-ci-deployment` 保持一致），**不随目录改名**。
 
 > **部署状态**：manifest 位于
 > [`github.com/opensourceways/ascend-ci-deployment/manifests/squid-rpardini`](https://github.com/opensourceways/ascend-ci-deployment/tree/main/manifests/squid-rpardini)
@@ -6,12 +10,13 @@
 > 本目录 `chart/` 是与之保持同步的副本，`tool/` 为 16 个 CI 工具 e2e 测试（提交到集群运行）。
 
 ```
-squid-rpardini/
+deploy/
 ├── chart/                  # ⚠️ 与 ascend-ci-deployment/manifests/squid-rpardini/chart 同步的副本
 ├── values-006.yaml         # ⚠️ gy-006 集群的值文件（the value of gy-006）
 ├── tool/                   # 16 个 CI 工具 e2e 测试（pip/apt/github/goproxy/bazel/npm/cargo/...）
 ├── SQUID-OVERVIEW.md       # 架构、路由、缓存策略、HA 设计
 ├── VERIFICATION.md         # gy-006 部署状态 + 监控接线验证记录
+├── DEPENDENCIES.md         # 独立部署依赖清单与 gap（当前非自包含，见此）
 └── DEPLOY.md               # 本文件：部署 + 注入
 ```
 
@@ -34,6 +39,23 @@ StatefulSet squid-cache (replicas=2 双活, 独立 PVC)
 ```
 
 ### 1.2 前置资源
+
+**CA / Secret 约定（安全）**
+
+Squid SSL-Bump 需要一套 CA。**出于安全，CA 私有材料不在本仓库生成、也不提交 git**——
+它保存在 Vault，由 secrets-manager 的 `SecretDefinition`（chart `templates/secret-definition.yaml`）
+**自动同步到集群 Secret**。部署与消费方**只需引用约定好的 secret name**，全程不接触 CA 明文。
+
+| Secret | Namespace | Key | 内容 | 谁引用 |
+|--------|-----------|-----|------|--------|
+| `squid-ca` | `squid` | `squid-ca-bundle.pem` | **私钥+证书**（SSL-Bump 签发） | StatefulSet 的 squid 容器（挂到 `/etc/squid/ssl_cert/`），init 容器再拆出 registry-proxy 的 ca.crt/ca.key |
+| `squid-ca` | `squid` | `squid-ca.pem` | 公钥证书 | 备用 |
+| `squid-ca-cert` | 每个用代理的 ns | `squid-ca.pem` | **仅公钥证书** | CI 客户端信任链（挂到 `/etc/squid-ca/`，见 §2.3） |
+
+同步行为由 `values.secretDefinition`（`enabled` / `vaultPath` / `caBundleKey` / `caPublicKey` / `caNamespaces`）控制。
+生产集群（如 gy-006）走这条路径，**无需手动建 secret**——只要保证引用的 secret name 与上表一致即可。
+
+> 下面的 `kubectl create secret` 仅为**无 Vault 的临时/测试集群**的回退手段（明文操作 CA，切勿用于生产）。
 
 ```bash
 KUBECONFIG=~/.kube/gy-006.yaml

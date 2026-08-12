@@ -2,7 +2,7 @@
 
 ## 1. What it is
 
-A caching forward proxy (MITM/SSL-bump) deployed in the `squid` namespace of the gy006 cluster, plus an optional registry cache sidecar. Everything is defined in `squid-rpardini/chart` (Helm chart):
+A caching forward proxy (MITM/SSL-bump) deployed in the `squid` namespace of the gy006 cluster, plus an optional registry cache sidecar. Everything is defined in `deploy/chart` (Helm chart):
 
 ```
 squid-cache (StatefulSet, ns: squid)
@@ -138,7 +138,7 @@ curl -x http://squid-cache.squid.svc.cluster.local:3128 -o /dev/null -s -w '%{ht
 ### 3.3 Deploy the chart
 
 ```bash
-helm install squid-cache ./squid-rpardini/chart -f values.yaml -n squid --kubeconfig ~/.kube/gy-006.yaml
+helm install squid-cache ./deploy/chart -f values.yaml -n squid --kubeconfig ~/.kube/gy-006.yaml
 ```
 
 ### 3.4 buildctl end-to-end
