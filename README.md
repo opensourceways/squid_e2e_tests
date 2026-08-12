@@ -1,8 +1,16 @@
-# Squid HA 方案验证
+# Squid CI 缓存代理：调研 · 验证 · 部署
 
-基于 **keepalived + HAProxy + Squid** 的 HTTP/HTTPS 缓存代理高可用方案的**端到端验证仓库**。
+持续调研、验证并留档 **Squid + BuildKit + metrics + docker cache** 这一整套 CI 缓存代理的部署逻辑、架构与组件——涵盖 HA 验证、benchmark、以及最终生产部署形态。
 
-包含完整的方案设计、可复现的 Docker 环境、以及带真实断言的自动化测试。目标：任何人 clone 下来 `./scripts/setup.sh && ./scripts/test-all.sh` 即可复现全部结果。
+## 仓库定位：两部分
+
+| | 内容 | 位置 | 修改约束 |
+|---|---|---|---|
+| **① 调研 / 方案 / 测试验证** | 方案设计、HA 验证、sizing、benchmark、BuildKit 扩展 | 根目录各文档 + `configs/ docker/ scripts/ tests/`（Compose HA）、`k8s/`（K8s HA）、`sizing/`、`buildkit/` | 大家可**按需修改补充** |
+| **② 实际部署 yaml** | gy-006 在跑的**真实生产部署**（Helm chart + CI 工具缓存测试） | **`deploy/`** | **最终部署形态，架构需仔细审视**；改前读 `deploy/DEPENDENCIES.md` |
+
+下文快速开始针对 **① 的 Docker Compose HA 验证套件**（clone 即 `./scripts/setup.sh && ./scripts/test-all.sh` 复现）。
+生产部署见 **`deploy/DEPLOY.md`**；给 agent 的总览见 **`AGENTS.md`**。
 
 ## 能力
 
@@ -139,7 +147,17 @@ cd buildkit && ./run-tests.sh   # 运行 BuildKit 扩展测试(自动起停 buil
 详见 `buildkit/README.md` 与 `buildkit/DESIGN.md`。依赖 BuildKit
 [PR #1](https://github.com/TommyLike/buildkit/pull/1)（`feature/upstream-proxy-config` 分支）。
 
-## 用于生产部署
+## 其他部分
 
-本仓库是**测试验证环境**，部分配置为测试专用（如 `ssl_bump bump all`、单播 VRRP、DNS 硬编码），
-**不可直接搬到生产**。生产部署的关键配置、测试↔生产差异、必改项清单见 **`PRODUCTION.md`**。
+| 部分 | 位置 | 说明 |
+|------|------|------|
+| **K8s HA 套件** | `k8s/` | 多副本 Deployment + Service，`kubectl` kill/stop pod 验证故障切换 |
+| **Sizing 推演** | `sizing/` | 按并发 N + 缓存天数 R 推 CPU/内存/带宽/磁盘，含实测校准 |
+| **BuildKit 扩展** | `buildkit/` | RUN 内 HTTPS 经内建代理链到 Squid 做代理+缓存（默认不随主套件跑，见上节） |
+| **实际生产部署** ② | **`deploy/`** | gy-006 在跑的 Helm chart；入口 `deploy/DEPLOY.md`，依赖与独立部署 gap 见 `deploy/DEPENDENCIES.md` |
+
+## 测试↔生产差异
+
+上面 ① 的 Compose 套件是**测试验证环境**，部分配置为测试专用（如 `ssl_bump bump all`、单播 VRRP、DNS 硬编码），
+**不可直接搬到生产**。生产部署的关键配置、测试↔生产差异、必改项清单见 **`PRODUCTION.md`**；
+云原生实际部署形态见 **`deploy/`**。
