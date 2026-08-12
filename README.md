@@ -199,6 +199,22 @@ CPU 消耗 = **每请求固定成本**(TLS 握手、证书生成、缓存查找)
 日志写入、缓存索引维护)。窗口越稀疏——比如里面有大量 `docker run` 启动等待——这部分占比越高,
 实测能占到测量值的三分之一。不扣掉会显著高估 CPU 成本,也会让两个窗口之间的比较失去意义。
 
+### K8s 上的同款采集
+
+`k8s/metrics-k8s.sh` 是 metrics.sh 的 K8s 版——**口径完全相同**(健康检查过滤、CONNECT 去重、
+HIER 错误分类、HIT/MISS 延迟分位、CPU 两项成本),只把数据源从 docker+HAProxy 换成
+`kubectl exec`(access.log、cgroup **v1** `cpuacct.usage`)+ `kubectl get endpoints`。
+一键跑 MISS/HIT 两窗口:
+
+```bash
+NS=test-husheng ./k8s/latency-test.sh   # 起 client pod → baseline → MISS 窗口 → HIT 窗口 → 清理
+```
+
+两点与 Compose 侧不同:① 没有 HAProxy/VIP,负载均衡是 Service `sessionAffinity: ClientIP`;
+② **K8s Service 保留客户端源 IP,归因层无需 PROXY protocol 即可用**(Compose 侧 Squid 只看得到
+HAProxy 节点 IP)。实测 HIT p50≈167ms、MISS p50≈1000ms,HIT 每请求 CPU 略高于 MISS
+——与"HIT 需重新加密更吃 CPU"方向一致。
+
 ## 其他部分
 
 | 部分 | 位置 | 说明 |

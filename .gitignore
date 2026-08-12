@@ -6,3 +6,5 @@ k8s/*.csv
 buildkit/src/
 .metrics-state
 .metrics-baseline
+.metrics-k8s-state
+.metrics-k8s-baseline
