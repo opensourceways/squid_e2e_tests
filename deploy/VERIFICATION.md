@@ -74,11 +74,29 @@ squid-cache-1.squid-cache-headless.squid:9301 → 45570   ← pod-1 独立 count
 （旧 Service series 5min 后自动过期）
 ```
 
-聚合查询（集群总量）：
+**查询写法差异**：headless 后每个指标有 **2 个 series**（每副本一个）。不加聚合时
+①命中率/②带宽会返回 2 行（每副本一条线）；要集群总量必须 `sum()` 后再除/取值：
 
 ```promql
-sum(rate(squid_client_http_requests_total{job="squid"}[5m]))        # 双副本合计
-sum by (instance) (squid_client_http_requests_total{job="squid"})   # 分副本
+# 集群总命中率（sum 后再除）
+sum(rate(squid_client_http_hits_total{job="squid"}[5m]))
+/ sum(rate(squid_client_http_requests_total{job="squid"}[5m]))
+
+# 每副本命中率（诊断哪副本缓存冷）
+rate(squid_client_http_hits_total{job="squid"}[5m])
+/ rate(squid_client_http_requests_total{job="squid"}[5m])
+
+# 集群总出站带宽 KB/s
+sum(rate(squid_client_http_kbytes_out_kbytes_total{job="squid"}[5m]))
+
+# 集群总回源带宽 KB/s（缓存节省量）
+sum(rate(squid_server_http_kbytes_in_kbytes_total{job="squid"}[5m]))
+
+# 副本分布
+sum by (instance) (squid_client_http_requests_total{job="squid"})
+
+# 副本流量均衡检查（1h 速率相差过大 = 某副本没接到流量）
+sum by (instance) (rate(squid_client_http_requests_total{job="squid"}[1h]))
 ```
 
 ### 2.3 实测指标（2026-08-11，squid-cache-0 部署约 1h）
