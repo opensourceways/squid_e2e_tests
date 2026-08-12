@@ -1,0 +1,133 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: test-traffic-git-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-traffic-git
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 3600
+  tasks:
+    - name: test-traffic-git
+      replicas: 10
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+              command:
+                - bash
+                - -c
+              args:
+                - |
+                  #!/bin/bash
+                  set -e
+                  echo "== task: $(hostname) =="
+                  sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.huaweicloud.com/ubuntu-ports|g' \
+                    /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
+                  apt-get update -qq 2>&1 | tail -1 || true
+                  apt-get install -y -qq git 2>&1 | tail -2 || { apt-get update -qq 2>&1 | tail -1 || true; apt-get install -y -qq git 2>&1 | tail -2; }
+                  T_START=$(date +%s%3N)
+
+                  echo ""
+                  echo "=========================================="
+                  echo "git clone gitcode.com/Ascend/pytorch (depth 1)"
+                  echo "(git smart-HTTP packs are NOT cached by squid —"
+                  echo " every task pulls the full pack from origin)"
+                  echo "=========================================="
+                  T0=$(date +%s%3N)
+                  rm -rf /workspace/pytorch
+                  git clone --depth 1 --quiet https://gitcode.com/ascend/pytorch.git /workspace/pytorch
+                  T1=$(date +%s%3N)
+                  SIZE=$(du -sb /workspace/pytorch 2>/dev/null | awk '{print $1}')
+                  MS=$((T1 - T0))
+                  echo "clone: ${MS}ms, size=${SIZE}B"
+                  if [ "$MS" -gt 0 ]; then
+                    echo "clone aggregate bandwidth: $(( SIZE * 1000 / MS )) B/s"
+                  fi
+
+                  T_END=$(date +%s%3N)
+                  echo ""
+                  echo "DURATION: $((T_END - T_START))ms"
+                  echo "== done $(hostname) =="
+              lifecycle:
+                postStart:
+                  exec:
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set +e
+                        P=/etc/squid-ca/squid-ca.pem
+                        if [ -f "$P" ]; then
+                          if [ -d /etc/pki/ca-trust/source/anchors ]; then      # RHEL/openEuler
+                            cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                            update-ca-trust extract >/dev/null 2>&1
+                          else                                                   # Debian/Ubuntu
+                            cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                            update-ca-certificates -f >/dev/null 2>&1
+                          fi
+                        fi
+                        if command -v apt-get >/dev/null 2>&1 && [ -n "$HTTPS_PROXY" ]; then
+                          mkdir -p /etc/apt/apt.conf.d
+                          printf 'Acquire::http::Proxy "%s";\nAcquire::https::Proxy "%s";\n' \
+                            "$HTTPS_PROXY" "$HTTPS_PROXY" > /etc/apt/apt.conf.d/99squid-proxy
+                        fi
+                        exit 0
+              workingDir: /workspace
+              resources:
+                limits:
+                  cpu: "2"
+                  memory: 2Gi
+                requests:
+                  cpu: "2"
+                  memory: 2Gi
+              env:
+                - name: WORKSPACE
+                  value: /workspace
+                - name: HTTP_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: HTTPS_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: http_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: https_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: NO_PROXY
+                  value: "localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+                - name: no_proxy
+                  value: "localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+                - name: SSL_CERT_FILE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: CURL_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
+                  value: /etc/squid-ca/squid-ca.pem
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true
+          nodeSelector:
+            kubernetes.io/arch: arm64
+          imagePullSecrets:
+            - name: huawei-swr-image-pull-secret-model-gy
+          activeDeadlineSeconds: 3600
+          securityContext:
+            runAsUser: 0
+          restartPolicy: Never

@@ -8,3 +8,5 @@ buildkit/src/
 .metrics-baseline
 .metrics-k8s-state
 .metrics-k8s-baseline
+traffic-test/logs
+traffic-test/traffic-gen
