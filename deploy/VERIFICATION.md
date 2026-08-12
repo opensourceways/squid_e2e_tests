@@ -94,3 +94,66 @@ kubectl --kubeconfig ~/.kube/gy-006.yaml -n squid delete pod squid-cache-0
 # 预期：squid-cache-1 全程 Ready，请求零中断（双活）
 # 检查：kubectl -n squid get pods -l app=squid-cache
 ```
+
+## 5. registry-proxy 监控方案（已确认无内置 /metrics）
+
+> 实测：rpardini/docker-registry-proxy **0.6.5 无内置 `/metrics`**（3128/metrics 返回欢迎页，
+> 无 stub_status）。squid-exporter 也看不到它——registry 流量走 splice（TCP_TUNNEL），
+> 不计入 squid HTTP counter。方案分三级，按需落地：
+
+### 方案 A：nginx stub_status（基础健康指标，5 分钟落地）
+
+entrypoint.sh 只覆盖 `cache_max_size.conf` / `allowed.methods.conf`，**其他 conf.d 文件保留**
+→ 挂载自定义 conf 开启 stub_status：
+
+```yaml
+# ConfigMap: registry-proxy-stub-status
+data:
+  stub_status.conf: |
+    server {
+        listen 8080;
+        location /stub_status {
+            stub_status on;
+            access_log off;
+            allow 127.0.0.1;
+            deny all;
+        }
+    }
+```
+
+StatefulSet registry-proxy 容器挂载 `/etc/nginx/conf.d/stub_status.conf`（subPath）。
+产出：`Active connections` / `accepts handled requests` / Reading-Writing-Waiting。
+**无 HIT/MISS**。
+
+### 方案 B：JSON 日志解析（缓存命中率，信息最全）
+
+nginx `log_format debug_proxy escape=json`（/etc/nginx/nginx.conf 内置），字段含：
+
+```json
+{"access_time":"...","host":"quay.io","status":"200","bytes_sent":"...",
+ "upstream_cache_status":"HIT","connect_host":"quay.io",...}
+```
+
+- `upstream_cache_status`: HIT / MISS / EXPIRED / UPDATING / STALE
+- `host` / `connect_host`: registry 域名（swr.cn-*/docker.io/quay.io/...）
+
+用 **vector / fluent-bit / loki** 采集 → 计数指标，PromQL 示例：
+
+```promql
+# 每 registry 命中率
+sum(rate(rp_cache_total{status="HIT"}[5m])) by (host)
+/ sum(rate(rp_cache_total[5m])) by (host)
+```
+
+### 方案 C：缓存盘统计（最省事，无需组件）
+
+```bash
+kubectl --kubeconfig ~/.kube/gy-006.yaml -n squid exec squid-cache-0 -c registry-proxy -- \
+  du -sh /docker_mirror_cache    # 对比 registry-cache PVC 200Gi 上限
+```
+
+### 决策建议
+
+1. 先上 **A（stub_status）**：零依赖，获得请求量/连接数健康度，Prometheus 直接抓
+2. 命中率需求出现时上 **B（vector 解析日志）**——这是唯一能拿到 HIT/MISS 的途径
+3. C 作为日常巡检补充
