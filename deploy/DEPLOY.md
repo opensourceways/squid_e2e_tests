@@ -1,4 +1,8 @@
-# squid-rpardini 部署方法与 CI 注入指南
+# deploy — Squid 生产部署方法与 CI 注入指南
+
+> **本目录（`deploy/`）是仓库里"实际部署形态"的一份留档**：架构、chart、values、验证记录。
+> 修改前请对照 `DEPENDENCIES.md` 了解它当前对外部环境（CA/私有镜像/StorageClass/Vault/监控）的耦合。
+> 生产 Helm release 名与 chart name 仍为 `squid-rpardini`（与 `ascend-ci-deployment` 保持一致），**不随目录改名**。
 
 > **部署状态**：manifest 位于
 > [`github.com/opensourceways/ascend-ci-deployment/manifests/squid-rpardini`](https://github.com/opensourceways/ascend-ci-deployment/tree/main/manifests/squid-rpardini)
@@ -6,12 +10,13 @@
 > 本目录 `chart/` 是与之保持同步的副本，`tool/` 为 16 个 CI 工具 e2e 测试（提交到集群运行）。
 
 ```
-squid-rpardini/
+deploy/
 ├── chart/                  # ⚠️ 与 ascend-ci-deployment/manifests/squid-rpardini/chart 同步的副本
 ├── values-006.yaml         # ⚠️ gy-006 集群的值文件（the value of gy-006）
 ├── tool/                   # 16 个 CI 工具 e2e 测试（pip/apt/github/goproxy/bazel/npm/cargo/...）
 ├── SQUID-OVERVIEW.md       # 架构、路由、缓存策略、HA 设计
 ├── VERIFICATION.md         # gy-006 部署状态 + 监控接线验证记录
+├── DEPENDENCIES.md         # 独立部署依赖清单与 gap（当前非自包含，见此）
 └── DEPLOY.md               # 本文件：部署 + 注入
 ```
 
