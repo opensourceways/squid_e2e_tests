@@ -52,6 +52,9 @@ data:
     refresh_pattern -i \.whl$  10080 100% 525960 ignore-reload override-expire ignore-no-cache
     refresh_pattern -i \.tar\.gz$ 10080 100% 525960 ignore-reload override-expire ignore-no-cache
     refresh_pattern -i \.deb$  10080 100% 525960 ignore-reload override-expire ignore-no-cache
+    refresh_pattern -i \.crate$  10080 100% 525960 ignore-reload override-expire ignore-no-cache
+    refresh_pattern -i \.zip$  10080 100% 525960 ignore-reload override-expire ignore-no-cache
+    refresh_pattern -i \.(pth|pt|safetensors)$  10080 100% 525960 ignore-reload override-expire ignore-no-cache
     refresh_pattern -i repo\.huaweicloud\.com/.*/simple/ 0 20% 4320 ignore-private ignore-reload override-vary
     refresh_pattern -i mirrors\.tuna\.tsinghua\.edu\.cn/.*/simple/ 0 20% 4320 ignore-private ignore-reload override-vary
     refresh_pattern -i .pypi.org/.* 0 20% 4320 ignore-private
