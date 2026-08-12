@@ -50,26 +50,27 @@ echo -e "conc\tpods_done\tper_pod_MB\ttotal_MB\twall_s\tagg_BW_MB_s\torigin_kb_s
 
 submit_ramp() {
   local n="$1" run_id="pvc-perf-$n"
-  kc delete job -l pipeline/run-id=$run_id -n $NS --ignore-not-found >/dev/null 2>&1
+  kc delete vj -l pipeline/run-id=$run_id -n $NS --ignore-not-found >/dev/null 2>&1
   python3 "$GEN" "$YAML" /tmp/pvc-perf-$n.yaml "$n"
   sed -i "s|pipeline/run-id: pvc-perf.*|pipeline/run-id: $run_id|" /tmp/pvc-perf-$n.yaml
-  kc apply -f /tmp/pvc-perf-$n.yaml >/dev/null
+  kc create -f /tmp/pvc-perf-$n.yaml >/dev/null 2>&1
   sleep 4
-  kc get jobs -l pipeline/run-id=$run_id -n $NS -o jsonpath='{.items[0].metadata.name}'
+  kc get vj -l pipeline/run-id=$run_id -n $NS -o jsonpath='{.items[0].metadata.name}'
 }
 
 wait_ramp() { # job → rc
-  local job="$1" pod done=0 end=$(( $(date +%s) + 900 ))
+  local job="$1" pod done=0 seen=0 end=$(( $(date +%s) + 900 ))
   while [ "$(date +%s)" -lt "$end" ]; do
-    done=1
+    done=1; seen=0
     for pod in $(kc get pods -n "$NS" -l "volcano.sh/job-name=$job" -o name 2>/dev/null | cut -d/ -f2); do
+      seen=1
       case "$(kc get pod -n "$NS" "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || echo Unknown)" in
         Succeeded) ;;
         Failed) echo "  pod FAILED: $pod" >&2; return 1 ;;
         *) done=0 ;;
       esac
     done
-    [ "$done" = "1" ] && return 0
+    [ "$done" = "1" ] && [ "$seen" = "1" ] && return 0
     sleep 5
   done
   echo "  TIMEOUT" >&2
@@ -140,4 +141,4 @@ done
 
 echo "" | tee -a "$OUT"
 echo "== summary: logs/pvc-perf/$TS.tsv ==" | tee -a "$OUT"
-awk -F'\t' 'NR>2 && $1!=""{print "  conc=" $1 "  agg_BW=" $6 " MB/s  hitrate=" $8}' "$OUT" | tee -a "$OUT"
+awk -F'\t' '$1 ~ /^[0-9]+$/{print "  conc=" $1 "  agg_BW=" $6 " MB/s  hitrate=" $8}' "$OUT" | tee -a "$OUT"
