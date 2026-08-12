@@ -79,7 +79,7 @@ git clone https://github.com/opensourceways/squid_e2e_tests.git && cd squid_e2e_
 | 01 | HTTP + HTTPS 代理连通(HTTP 200 断言) |
 | 02 | 单 Squid 故障,代理仍返回 200 |
 | 03 | HAProxy 节点故障,VIP 双向漂移,代理仍返回 200 |
-| 04 | HTTPS SSL Bump 缓存,展示首次(MISS)与二次(HIT)耗时对比 |
+| 04 | HTTPS SSL Bump 缓存,**分层指标**: HIT/MISS 延迟分位(p50/p95/p99)+ CPU 两项成本 + 错误分类(用 `scripts/metrics.sh`) |
 | 05 | 下载中 Squid 中断,代理仍返回 200 |
 | 06 | 两台 Squid 同时故障(仅剩 1/3),代理仍返回 200 |
 
@@ -100,13 +100,13 @@ git clone https://github.com/opensourceways/squid_e2e_tests.git && cd squid_e2e_
   ✓ 恢复后代理: HTTP 200
   [02-squid-failover.sh] PASS (24s)
 ...
---- 04-https-cache.sh ---
-  ✓ 首次下载(MISS): HTTP 200
-  首次(MISS): 2.6s  15000000 bytes  5700000 B/s
-  ✓ 二次下载(HIT): HTTP 200
-  二次(HIT):  0.16s  15000000 bytes  95000000 B/s
-  耗时对比: 首次 2.6s → 二次 0.16s
-  [04-https-cache.sh] PASS (5s)
+--- 04-https-cache.sh ---   (分层指标, 用 metrics.sh 框定 MISS/HIT 两个窗口)
+  ✓ 冷取(MISS): HTTP 200
+    MISS  n=1   p50=3638ms   请求命中率 0%    每请求CPU 0.247s  每GB 17.8s
+  ✓ 命中(HIT): HTTP 200
+    HIT   n=30  p50=130 p95=148 p99=149 ms   请求命中率 100%  每请求CPU 0.085s  每GB 6.1s
+    → 缓存价值 = 延迟 28× 提速(3638→130ms); 两次采样看不到 p95/p99 分布与 CPU 成本
+  [04-https-cache.sh] PASS
 ...
 ============================================
   结果: 6 通过 / 0 失败 / 6 总计
