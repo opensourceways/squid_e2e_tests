@@ -51,7 +51,7 @@ echo -e "conc\tpods_done\tper_pod_MB\ttotal_MB\twall_s\tagg_BW_MB_s\torigin_kb_s
 submit_ramp() {
   local n="$1" run_id="pvc-perf-$n"
   kc delete vj -l pipeline/run-id=$run_id -n $NS --ignore-not-found >/dev/null 2>&1
-  python3 "$GEN" "$YAML" /tmp/pvc-perf-$n.yaml "$n"
+  python3 "$GEN" "$YAML" /tmp/pvc-perf-$n.yaml "$n" >/dev/null
   sed -i "s|pipeline/run-id: pvc-perf.*|pipeline/run-id: $run_id|" /tmp/pvc-perf-$n.yaml
   kc create -f /tmp/pvc-perf-$n.yaml >/dev/null 2>&1
   sleep 4
