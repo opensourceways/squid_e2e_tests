@@ -22,6 +22,7 @@ spec:
         spec:
           nodeSelector:
             kubernetes.io/arch: arm64
+          restartPolicy: Never
           containers:
             - name: test
               image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
