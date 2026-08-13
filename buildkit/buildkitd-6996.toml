@@ -1,0 +1,14 @@
+# buildkitd 配置 —— 基于上游 PR #6996(env 变量式上游代理, 无 [proxy] 段)
+# 上游代理完全由 buildkitd 进程环境变量决定: HTTP_PROXY / HTTPS_PROXY / NO_PROXY
+# CA 信任走系统信任库: 容器里设 SSL_CERT_FILE=/etc/buildkit/squid-ca.pem
+
+# 开启内置 MITM 代理:给 RUN exec 注入 HTTP(S)_PROXY 并注入 CA
+proxyNetwork = true
+
+[worker.oci]
+enabled = true
+# 沙箱网络用 host,确保 RUN 沙箱/代理出向能路由到 Squid VIP(172.30.0.100)
+net = "host"
+
+[worker.containerd]
+enabled = false
