@@ -88,8 +88,9 @@ persistence:
 secretDefinition:
   enabled: false
   vaultPath: secrets/data/ascend/ci
-  caBundleKey: squid_ca_bundle_pem
-  caPublicKey: squid_ca_pem
+  caBundleKey: squid_ca_bundle_v3_pem
+  caPublicKey: squid_ca_v3_pem
+  caTruststoreKey: squid_bazel_trust_v3_jks
   caNamespaces: []
   # - buildkitd
   # - ascend-gha-runners
