@@ -31,8 +31,9 @@ squid-cache.squid:9301 (squid-exporter, 双活各一个)
 ### 2.2 关键教训：ConfigMap 更新 ≠ 自动生效
 
 agent 运行配置**不会**随 ConfigMap 自动加载。修改
-`monitoring/config-for-guiyang-006/prometheus-agent-configmap-patch.yaml` 并 apply 后，
-必须热加载：
+[`github.com/opensourceways/ascend-ci-deployment`](https://github.com/opensourceways/ascend-ci-deployment)
+仓库的 `monitoring/config-for-guiyang-006/prometheus-agent-configmap-patch.yaml`
+并 apply 后，必须热加载：
 
 ```bash
 kubectl -n monitoring exec <prometheus-agent-pod> -- \
@@ -44,6 +45,59 @@ kubectl -n monitoring exec <prometheus-agent-pod> -- \
 ```
 
 agent 参数已带 `--web.enable-lifecycle`，`/-/reload` 直接可用。
+
+> 注意：ConfigMap 卷在 kubelet 侧同步有延迟（实测 >3min 未同步）。
+> **直接 `kubectl -n monitoring rollout restart deploy/prometheus-agent` 最可靠**——重启即加载最新配置，替代 reload。
+
+### 2.4 双活采样修正：headless 每副本 target（2026-08-12）
+
+**问题**：squid job 原 target 是 Service `squid-cache.squid:9301` → kube-proxy 轮询两个 pod。
+agent 的 keep-alive 连接把样本粘在 pod-0（series 单调无反转），但**连接一旦断开重连**
+可能落到 pod-1 → 同一 series 的 counter 跳变（每 pod 独立 counter），`rate()` 全错。
+
+**修复**（ascend-ci-deployment commit `0daf930b`，同一 configmap-patch 文件）：
+改为 StatefulSet headless DNS 每副本独立 target：
+
+```yaml
+- job_name: squid
+  static_configs:
+  - targets:
+    - squid-cache-0.squid-cache-headless.squid:9301
+    - squid-cache-1.squid-cache-headless.squid:9301
+```
+
+**验证**（中央 113.44.182.82）：
+
+```
+squid-cache-0.squid-cache-headless.squid:9301 → 45845   ← pod-0 独立 counter
+squid-cache-1.squid-cache-headless.squid:9301 → 45570   ← pod-1 独立 counter
+（旧 Service series 5min 后自动过期）
+```
+
+**查询写法差异**：headless 后每个指标有 **2 个 series**（每副本一个）。不加聚合时
+①命中率/②带宽会返回 2 行（每副本一条线）；要集群总量必须 `sum()` 后再除/取值：
+
+```promql
+# 集群总命中率（sum 后再除）
+sum(rate(squid_client_http_hits_total{job="squid"}[5m]))
+/ sum(rate(squid_client_http_requests_total{job="squid"}[5m]))
+
+# 每副本命中率（诊断哪副本缓存冷）
+rate(squid_client_http_hits_total{job="squid"}[5m])
+/ rate(squid_client_http_requests_total{job="squid"}[5m])
+
+# 集群总出站带宽 KB/s
+sum(rate(squid_client_http_kbytes_out_kbytes_total{job="squid"}[5m]))
+
+# 集群总回源带宽 KB/s（缓存节省量）
+sum(rate(squid_server_http_kbytes_in_kbytes_total{job="squid"}[5m]))
+
+# 副本分布
+sum by (instance) (squid_client_http_requests_total{job="squid"})
+
+# 副本流量均衡检查（1h 速率相差过大 = 某副本没接到流量）
+sum by (instance) (rate(squid_client_http_requests_total{job="squid"}[1h]))
+```
 
 ### 2.3 实测指标（2026-08-11，squid-cache-0 部署约 1h）
 
@@ -94,3 +148,66 @@ kubectl --kubeconfig ~/.kube/gy-006.yaml -n squid delete pod squid-cache-0
 # 预期：squid-cache-1 全程 Ready，请求零中断（双活）
 # 检查：kubectl -n squid get pods -l app=squid-cache
 ```
+
+## 5. registry-proxy 监控方案（已确认无内置 /metrics）
+
+> 实测：rpardini/docker-registry-proxy **0.6.5 无内置 `/metrics`**（3128/metrics 返回欢迎页，
+> 无 stub_status）。squid-exporter 也看不到它——registry 流量走 splice（TCP_TUNNEL），
+> 不计入 squid HTTP counter。方案分三级，按需落地：
+
+### 方案 A：nginx stub_status（基础健康指标，5 分钟落地）
+
+entrypoint.sh 只覆盖 `cache_max_size.conf` / `allowed.methods.conf`，**其他 conf.d 文件保留**
+→ 挂载自定义 conf 开启 stub_status：
+
+```yaml
+# ConfigMap: registry-proxy-stub-status
+data:
+  stub_status.conf: |
+    server {
+        listen 8080;
+        location /stub_status {
+            stub_status on;
+            access_log off;
+            allow 127.0.0.1;
+            deny all;
+        }
+    }
+```
+
+StatefulSet registry-proxy 容器挂载 `/etc/nginx/conf.d/stub_status.conf`（subPath）。
+产出：`Active connections` / `accepts handled requests` / Reading-Writing-Waiting。
+**无 HIT/MISS**。
+
+### 方案 B：JSON 日志解析（缓存命中率，信息最全）
+
+nginx `log_format debug_proxy escape=json`（/etc/nginx/nginx.conf 内置），字段含：
+
+```json
+{"access_time":"...","host":"quay.io","status":"200","bytes_sent":"...",
+ "upstream_cache_status":"HIT","connect_host":"quay.io",...}
+```
+
+- `upstream_cache_status`: HIT / MISS / EXPIRED / UPDATING / STALE
+- `host` / `connect_host`: registry 域名（swr.cn-*/docker.io/quay.io/...）
+
+用 **vector / fluent-bit / loki** 采集 → 计数指标，PromQL 示例：
+
+```promql
+# 每 registry 命中率
+sum(rate(rp_cache_total{status="HIT"}[5m])) by (host)
+/ sum(rate(rp_cache_total[5m])) by (host)
+```
+
+### 方案 C：缓存盘统计（最省事，无需组件）
+
+```bash
+kubectl --kubeconfig ~/.kube/gy-006.yaml -n squid exec squid-cache-0 -c registry-proxy -- \
+  du -sh /docker_mirror_cache    # 对比 registry-cache PVC 200Gi 上限
+```
+
+### 决策建议
+
+1. 先上 **A（stub_status）**：零依赖，获得请求量/连接数健康度，Prometheus 直接抓
+2. 命中率需求出现时上 **B（vector 解析日志）**——这是唯一能拿到 HIT/MISS 的途径
+3. C 作为日常巡检补充
