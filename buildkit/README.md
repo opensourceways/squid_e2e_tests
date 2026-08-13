@@ -18,6 +18,22 @@ Squid HA，完成**代理 + SSL Bump 缓存**。
 预构建镜像已推送，无需自行编译：`tommylike/buildkit-upstream-proxy:latest`
 （自行构建见 `image/README.md`）
 
+## 上游 PR #6996 变体（env 变量式，已端到端验证）
+
+上游社区（gmarmstrong）在 moby/buildkit#6996 用**环境变量**实现了同一能力：
+上游代理从 buildkitd 进程的 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 读取，**无 cert 配置**，
+CA 信任走系统信任库（`SSL_CERT_FILE`）。与上面 fork 方案（`[proxy]` 段 + `upstreamCACert`）
+的差异及端到端验证结果见 **`../reports/buildkit-pr6996-validation-20260813.md`**。
+
+验证资产（与 fork 版并列，互不影响）：
+
+- `buildkitd-6996.toml` —— 无 `[proxy]` 段，仅 `proxyNetwork = true`
+- `docker-compose.6996.yml` —— env 变量式部署（`HTTP(S)_PROXY` + `SSL_CERT_FILE`）
+- 镜像：`tommylike/buildkit-6996:test`（从 `gmarmstrong/buildkit@proxy-chaining` 编译）
+
+关键实测结论：正对照（RUN HTTPS 经 Squid 下载成功）、缓存命中（TCP_HIT 增加）、
+负对照（无 CA → 502）全部符合设计；一次 env 配置同时覆盖 **PULL + RUN** 两个场景。
+
 ## 快速开始
 
 ```bash
@@ -61,8 +77,10 @@ Squid HA (VIP) SSL Bump 解密 → 缓存 → 回源
 buildkit/
 ├── README.md                    ← 本文件
 ├── DESIGN.md                    ← 设计与信任链、权限实证
-├── buildkitd.toml               ← proxyNetwork + [proxy] upstreamURL/CACert
-├── docker-compose.buildkit.yml  ← buildkitd(精简 cap)
+├── buildkitd.toml               ← proxyNetwork + [proxy] upstreamURL/CACert(fork 版)
+├── docker-compose.buildkit.yml  ← buildkitd(精简 cap, fork 版)
+├── buildkitd-6996.toml          ← 上游 #6996 变体(env 变量式, 无 [proxy] 段)
+├── docker-compose.6996.yml      ← 上游 #6996 变体(HTTP(S)_PROXY + SSL_CERT_FILE)
 ├── Dockerfile.test              ← 测试镜像(RUN curl https)
 ├── run-tests.sh                 ← 扩展测试入口(起停 buildkitd + 跑用例)
 ├── image/README.md              ← 如何自行编译镜像
