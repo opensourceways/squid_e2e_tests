@@ -28,6 +28,9 @@ images:
   exporter:
     repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/boynux/squid-exporter
     tag: "v1.13.0"
+  registryExporter:
+    repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine
+    tag: "3.23.3"
 
 alpineMirror: "https://mirrors.ustc.edu.cn/alpine/v3.23"
 
@@ -74,6 +77,21 @@ registryProxy:
     limits:
       cpu: 2
       memory: 2Gi
+
+# registry-exporter: tails the registry-proxy nginx access.log (shared via
+# subPath emptyDir) and exports counters with the same semantics/naming as
+# the squid exporter, so one PromQL hitrate formula covers both proxies.
+# Requires python3 (apk add on startup, alpine base image).
+registryExporter:
+  enabled: true
+  listenPort: 9302
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
 
 # Per-pod cache PVCs (created via volumeClaimTemplates). Each replica has
 # its own RWO volume - no shared write path, no arbitration needed.

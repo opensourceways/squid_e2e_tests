@@ -13,6 +13,11 @@ spec:
     name: metrics
     targetPort: {{ .Values.exporter.listenPort }}
   {{- end }}
+  {{- if and .Values.registryProxy.enabled .Values.registryExporter.enabled }}
+  - port: {{ .Values.registryExporter.listenPort }}
+    name: registry-metrics
+    targetPort: {{ .Values.registryExporter.listenPort }}
+  {{- end }}
   selector:
     app: squid-cache
 ---
@@ -32,6 +37,10 @@ spec:
   {{- if .Values.exporter.enabled }}
   - port: {{ .Values.exporter.listenPort }}
     name: metrics
+  {{- end }}
+  {{- if and .Values.registryProxy.enabled .Values.registryExporter.enabled }}
+  - port: {{ .Values.registryExporter.listenPort }}
+    name: registry-metrics
   {{- end }}
   selector:
     app: squid-cache

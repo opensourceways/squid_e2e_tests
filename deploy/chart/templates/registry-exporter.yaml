@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registry-exporter
+  namespace: {{ .Values.namespace | default "squid" }}
+data:
+  registry-exporter.py: |
+{{ .Files.Get "registry-exporter.py" | indent 4 }}

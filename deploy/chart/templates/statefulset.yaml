@@ -186,8 +186,39 @@ spec:
           mountPath: /ca
         - name: registry-cache
           mountPath: /docker_mirror_cache
+        {{- if .Values.registryExporter.enabled }}
+        # subPath mount shadows the in-image /dev/stdout symlink so the
+        # access.log is shared with the registry-exporter sidecar
+        - name: registry-log
+          mountPath: /var/log/nginx/access.log
+          subPath: access.log
+        {{- end }}
         resources:
           {{- toYaml .Values.registryProxy.resources | nindent 10 }}
+
+      {{- if and .Values.registryProxy.enabled .Values.registryExporter.enabled }}
+      - name: registry-exporter
+        image: {{ .Values.images.registryExporter.repository }}:{{ .Values.images.registryExporter.tag }}
+        command:
+          - /bin/sh
+          - -c
+          - |
+            apk add --no-cache python3 >/dev/null 2>&1
+            exec python3 /mnt/registry-exporter.py /var/log/nginx/access.log {{ .Values.registryExporter.listenPort }}
+        ports:
+        - containerPort: {{ .Values.registryExporter.listenPort }}
+          name: registry-metrics
+        volumeMounts:
+        - name: registry-exporter-script
+          mountPath: /mnt/registry-exporter.py
+          subPath: registry-exporter.py
+          readOnly: true
+        - name: registry-log
+          mountPath: /var/log/nginx/access.log
+          subPath: access.log
+        resources:
+          {{- toYaml .Values.registryExporter.resources | nindent 10 }}
+      {{- end }}
       {{- end }}
 
       volumes:
@@ -206,6 +237,16 @@ spec:
       {{- if .Values.registryProxy.enabled }}
       - name: registry-ca
         emptyDir: {}
+      {{- end }}
+      {{- if and .Values.registryProxy.enabled .Values.registryExporter.enabled }}
+      - name: registry-log
+        emptyDir: {}
+      - name: registry-exporter-script
+        configMap:
+          name: registry-exporter
+          items:
+          - key: registry-exporter.py
+            path: registry-exporter.py
       {{- end }}
   volumeClaimTemplates:
   - metadata:
