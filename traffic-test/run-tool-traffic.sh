@@ -8,8 +8,8 @@
 #   ./run-tool-traffic.sh --all                  # run all 16 cases
 #   ./run-tool-traffic.sh --monitor 7200         # also sample squid traffic
 #
-# Logs:       tracfic-test/logs/tool/<case>-<job>/<pod>.log
-# Timeline:   tracfic-test/logs/tool/timeline.tsv  (ts  case  action  job)
+# Logs:       traffic-test/logs/tool/<case>-<job>/<pod>.log
+# Timeline:   traffic-test/logs/tool/timeline.tsv  (ts  case  action  job)
 set -euo pipefail
 
 KUBECONFIG="${KUBECONFIG:-$HOME/.kube/gy-006.yaml}"

@@ -1,4 +1,4 @@
-# tracfic-test 实测结果（2026-08-12, gy-006）
+# traffic-test 实测结果（2026-08-12, gy-006）
 
 10 个并行 Volcano 任务模拟 CI 并发，全部走 squid SSL-Bump（`squid-cache.squid:3128`）。
 数据来源：中央 Prometheus（`113.44.182.82:9090`，headless 每副本 scrape）+ 双副本 access.log。

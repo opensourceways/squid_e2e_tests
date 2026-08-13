@@ -8,7 +8,7 @@
 #   ./run.sh git --monitor 900        # also sample squid traffic from central Prometheus
 #
 # Kubeconfig: KUBECONFIG env or ~/.kube/gy-006.yaml
-# Logs:       tracfic-test/logs/<yaml>-<job>.log (one per pod)
+# Logs:       traffic-test/logs/<yaml>-<job>.log (one per pod)
 set -euo pipefail
 
 KUBECONFIG="${KUBECONFIG:-$HOME/.kube/gy-006.yaml}"

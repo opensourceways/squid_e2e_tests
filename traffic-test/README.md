@@ -1,4 +1,4 @@
-# tracfic-test — 模拟 CI 并发流量的 Squid 流量模式测试
+# traffic-test — 模拟 CI 并发流量的 Squid 流量模式测试
 
 在 gy-006 集群（namespace `squid`）用 **10 个并行 Volcano 任务**模拟真实 CI 并发，
 通过 squid SSL-Bump 代理访问 `gitcode.com/Ascend` 真实仓库，观察 squid 的流量模式
