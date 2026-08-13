@@ -117,6 +117,25 @@ spec:
                       - |
                         set +e
 
+                        # JKS is stored base64-encoded in Vault (KV v2 stores
+                        # strings only) → decode to a real keystore on disk.
+                        # The secret mount is read-only, but /etc/squid-bazel-trust
+                        # is a plain writable dir in the container layer.
+                        S=/etc/squid-ca/squid-bazel-trust.jks
+                        J=/etc/squid-bazel-trust/squid-bazel-trust.jks
+                        mkdir -p /etc/squid-bazel-trust
+                        if [ -f "$S" ]; then
+                          if base64 -d "$S" > "$J" 2>/dev/null \
+                             && [ -s "$J" ] \
+                             && [ "$(od -An -tx1 -N4 "$J" | tr -d ' ')" = "feedfeed" ]; then
+                            echo "JKS decoded from base64 -> $J"
+                          else
+                            cp "$S" "$J" 2>/dev/null
+                            echo "JKS used as-is -> $J"
+                          fi
+                          chmod 644 "$J" 2>/dev/null
+                        fi
+
                         # Bazel JVM trust: point JVM at the mounted squid-CA keystore
                         # (Bazel ignores JAVA_TOOL_OPTIONS; args must come via .bazelrc)
                         cat > "$WORKSPACE/.bazelrc" << 'EOF'
@@ -180,9 +199,6 @@ spec:
                 - name: squid-ca
                   mountPath: /etc/squid-ca
                   readOnly: true
-                - name: squid-bazel-trust
-                  mountPath: /etc/squid-bazel-trust
-                  readOnly: true
           volumes:
             - name: squid-ca
               secret:
@@ -190,10 +206,8 @@ spec:
                 items:
                   - key: squid-ca.pem
                     path: squid-ca.pem
-                optional: true
-            - name: squid-bazel-trust
-              configMap:
-                name: squid-bazel-trust
+                  - key: squid-bazel-trust.jks
+                    path: squid-bazel-trust.jks
                 optional: true
           nodeSelector:
             kubernetes.io/arch: arm64
