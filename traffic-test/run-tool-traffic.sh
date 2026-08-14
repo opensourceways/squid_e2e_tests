@@ -15,7 +15,7 @@ set -euo pipefail
 KUBECONFIG="${KUBECONFIG:-$HOME/.kube/gy-006.yaml}"
 NS="squid"
 DIR="$(cd "$(dirname "$0")" && pwd)"
-TOOL_DIR="${TOOL_DIR:-$DIR/../../squid-openssl/testcase/tool}"
+TOOL_DIR="${TOOL_DIR:-$DIR/tool}"
 GEN="$DIR/gen-replicas.py"
 GEN_DIR="$DIR/traffic-gen"
 LOG_DIR="$DIR/logs/tool"
@@ -65,20 +65,18 @@ submit_case() { # case-num → job
   echo "$jname"
 }
 
-wait_case() { # job → rc
-  local job="$1" done=0 pod
+wait_case() { # job → rc; wait for the Volcano Job itself (pods may be
+             # scheduled in batches, so pod-level checks return too early)
+  local job="$1" phase
   local end=$(( $(date +%s) + 3600 ))
   while [ "$(date +%s)" -lt "$end" ]; do
-    done=1
-    for pod in $(kc get pods -n "$NS" -l "volcano.sh/job-name=$job" -o name 2>/dev/null | cut -d/ -f2); do
-      case "$(kc get pod -n "$NS" "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || echo Unknown)" in
-        Succeeded) ;;
-        Failed) echo "  pod FAILED: $pod"; done=2 ;;
-        *) done=0 ;;
-      esac
-    done
-    [ "$done" = "1" ] && return 0
-    [ "$done" = "2" ] && return 1
+    phase=$(kc get vj -n "$NS" "$job" -o jsonpath='{.status.state.phase}' 2>/dev/null || echo "")
+    case "$phase" in
+      Completed) return 0 ;;
+      Failed|Aborted) echo "  vj FAILED: $job (phase=$phase)"; return 1 ;;
+      "") : ;;  # vj not found yet
+      *) : ;;   # Pending/Running/... keep waiting
+    esac
     sleep 10
   done
   echo "  TIMEOUT" >&2
@@ -106,7 +104,9 @@ for c in "${CASES[@]}"; do
   fi
 done
 
-[ "$MONITOR" = "1" ] && { wait "$MON_PID" 2>/dev/null || true; }
+if [ "$MONITOR" = "1" ]; then
+  wait "$MON_PID" 2>/dev/null || true
+fi
 
 echo ""
 echo "== timeline =="

@@ -30,6 +30,7 @@ spec:
                 - |
                   #!/bin/bash
                   set -e
+                  set -o pipefail
                   sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.huaweicloud.com/ubuntu-ports|g' \
                     /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
                   apt-get update -qq 2>&1 | tail -2 || true
@@ -44,7 +45,7 @@ spec:
                   echo "--- install packages (cold fetch) ---"
                   echo -n "pip install requests (pypi.org)     → "
                   pip install --quiet --break-system-packages -i https://mirrors.huaweicloud.com/repository/pypi/simple requests 2>&1 | tail -1
-                  echo "✅"
+                  echo "✅  (rc=$?)"
 
                   echo -n "pip install pyyaml (tsinghua)       → "
                   pip install --quiet --break-system-packages \
@@ -199,9 +200,9 @@ spec:
                   value: /etc/squid-ca/squid-ca.pem
                 - name: REQUESTS_CA_BUNDLE
                   value: /etc/squid-ca/squid-ca.pem
-                - name: GIT_SSL_CAINFO
-                  value: /etc/squid-ca/squid-ca.pem
                 - name: PIP_CERT
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
                   value: /etc/squid-ca/squid-ca.pem
                 - name: NODE_EXTRA_CA_CERTS
                   value: /etc/squid-ca/squid-ca.pem

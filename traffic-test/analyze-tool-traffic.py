@@ -31,8 +31,8 @@ def delta(met, s, e):
 def accesslog(pod, s, e):
     """return {status: (reqs, bytes)} in window from pod access.log"""
     out = subprocess.run(
-        ["kubectl", "--kubeconfig", KUBECONFIG, "exec", "-n", "squid", pod, "--",
-         "sh", "-c", f'awk \'{{if ($1>={s} && $1<={e}) {{x=$4; sub(/\\/.*/,"",x); c[x]++; b[x]+=$5}}}} END{{for (k in c) printf "%s %d %d\\n", k, c[k], b[k]}}\' /var/log/squid/access.log'],
+        ["kubectl", "--kubeconfig", KUBECONFIG, "exec", "-n", "squid", pod, "-c", "squid", "--",
+         "sh", "-c", f'awk \'{{if ($1>={s} && $1<={e}) {{x=$4; sub(/\\/.*/,"",x); c[x]++; b[x]+=$5}}}} END{{for (k in c) printf "%s %d %.0f\\n", k, c[k], b[k]}}\' /var/log/squid/access.log'],
         capture_output=True, text=True, timeout=60)
     res = {}
     for line in out.stdout.splitlines():
