@@ -79,3 +79,39 @@ python3 analyze-tool-traffic.py              # 汇总表 → logs/tool/analysis.
 - timeline：`logs/tool/timeline.tsv`（SUBMIT/DONE epoch，用于窗口对齐）
 - 日志：`logs/tool/<case>-<name>/pod-N.log`（每 case 10 份）
 - 流量采样：`logs/tool/traffic.tsv`（client/origin/hitrate 曲线，rate[5m]）
+
+## 追加：gitcode 流量测试（2026-08-14）
+
+测试 job `test-squid-gitcode-2rslh`（2× clone + ls-remote，7.2s）：
+
+| 请求 | 结果 | 说明 |
+|---|---|---|
+| GET `gitcode.com/Ascend/mind-cluster.git/info/refs` ×2 | TCP_MISS | ~1KB，元数据 |
+| POST `git-upload-pack`（31.8MB + 2.8MB） | TCP_MISS | **git smart-HTTP pack 为 POST，结构性不可缓存** |
+
+**结论：gitcode clone = 0% HIT，与 github 相同，无需新增缓存规则。**
+
+### gitcode 非 git 路径探测（全部被 WAF 阻断）
+
+| 路径 | 结果 |
+|---|---|
+| `/-/archive/<ref>.zip` / `/archive/...zip` | WAF 验证页（206 text/html 3.5KB） |
+| `/api/v4/.../releases` | **HTTP 418** |
+| `/-/releases/download/...` | **HTTP 403** |
+
+release/archive 流量被 WAF 拦截，从未到达 squid → 无 release/archive 可缓存。
+
+### 追加：冷缓存崩溃重测记录（2026-08-14，r5）
+
+清空缓存后重跑 16-tool 回归时 squid 崩溃（详见 `deploy/CACHE-STRATEGY.md` §10.2），
+r5 数据无效。随后单 case 02（apt）冷缓存小规模验证**有效**：
+
+| 指标 | 值 |
+|---|---|
+| HIT（TCP_HIT+MEM_HIT+REFRESH_UNMODIFIED） | 357.8MB |
+| MISS | 189.3MB |
+| **HIT%** | **65.4%** |
+| SWAPFAIL / 崩溃 | 0 / 无 |
+
+首个 pod 回源（MISS），后 9 个 pod 全部命中（HIT）——冷缓存下 apt 行为符合预期，
+且单 case 不触发 SWAPFAIL/竞态崩溃。
