@@ -52,7 +52,7 @@ spec:
                   curl -s -o /dev/null -w "%{http_code} (%{time_total}s)\n" https://api.github.com || echo "❌ FAILED"
 
                   echo -n "HTTPS GET raw.githubusercontent.com → "
-                  curl -s -o /dev/null -w "%{http_code} (%{time_total}s)\n" \
+                  curl -s --max-time 120 -o /dev/null -w "%{http_code} (%{time_total}s)\n" \
                     https://raw.githubusercontent.com/vllm-project/vllm-ascend/main/README.md || echo "❌ FAILED"
 
                   echo ""
