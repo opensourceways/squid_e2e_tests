@@ -89,14 +89,13 @@ wait_pods_done() { # job → rc; wait until ALL pods of the job have finished.
                    # reflect the true end of traffic. NB: vj may turn Completed
                    # before ANY pod exists (batch scheduling), so we must wait
                    # for at least one pod to appear before trusting pod counts.
-  local job="$1" left seen
+  local job="$1" left total
   local end=$(( $(date +%s) + 1800 ))
-  seen=0
   while [ "$(date +%s)" -lt "$end" ]; do
-    left=$(kc get pods -n "$NS" -l "volcano.sh/job-name=$job" -o jsonpath='{range .items[*]}{.status.phase}{" "}{end}' 2>/dev/null \
-             | tr ' ' '\n' | grep -cE 'Running|Pending|ContainerCreating|Unknown' || true)
-    [ "$left" -gt 0 ] && seen=1
-    [ "$seen" = "1" ] && [ "$left" = "0" ] && return 0
+    states=$(kc get pods -n "$NS" -l "volcano.sh/job-name=$job" -o jsonpath='{range .items[*]}{.status.phase}{" "}{end}' 2>/dev/null)
+    total=$(printf '%s\n' "$states" | tr ' ' '\n' | grep -cE '.+' || true)
+    left=$(printf '%s\n' "$states" | tr ' ' '\n' | grep -cE 'Running|Pending|ContainerCreating|Unknown' || true)
+    [ "$total" -gt 0 ] && [ "$left" = "0" ] && return 0
     sleep 10
   done
   echo "  wait_pods_done TIMEOUT" >&2

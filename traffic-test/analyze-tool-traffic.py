@@ -9,6 +9,7 @@ Output: summary table + per-case JSON.
 import json
 import subprocess
 import sys
+import time
 import urllib.request
 import urllib.parse
 
@@ -28,17 +29,61 @@ def delta(met, s, e):
     vals = [float(x[1]) for x in r[0]["values"] if x[1] != ""]
     return (vals[-1] - vals[0]) / 1024 if len(vals) >= 2 else 0
 
-def accesslog(pod, s, e):
-    """return {status: (reqs, bytes)} in window from pod access.log"""
+def pod_ips(job):
+    """return set of pod IPs for a volcano job (from pod statuses)."""
     out = subprocess.run(
-        ["kubectl", "--kubeconfig", KUBECONFIG, "exec", "-n", "squid", pod, "-c", "squid", "--",
-         "sh", "-c", f'awk \'{{if ($1>={s} && $1<={e}) {{x=$4; sub(/\\/.*/,"",x); c[x]++; b[x]+=$5}}}} END{{for (k in c) printf "%s %d %.0f\\n", k, c[k], b[k]}}\' /var/log/squid/access.log'],
-        capture_output=True, text=True, timeout=60)
+        ["kubectl", "--kubeconfig", KUBECONFIG, "get", "pods", "-n", "squid",
+         "-l", f"volcano.sh/job-name={job}", "-o",
+         "jsonpath={range .items[*]}{.status.podIP}{\" \"}{end}"],
+        capture_output=True, text=True, timeout=90)
+    return set(out.stdout.split()) if out.returncode == 0 else set()
+
+def cluster_offset():
+    """cluster epoch - local epoch; timeline.tsv timestamps are recorded on the
+    local host while access.log uses the cluster clock (NTP skew observed:
+    ~2min)."""
+    for attempt in range(3):
+        out = subprocess.run(
+            ["kubectl", "--kubeconfig", KUBECONFIG, "exec", "-n", "squid",
+             "squid-cache-0", "-c", "squid", "--", "date", "+%s"],
+            capture_output=True, text=True, timeout=90)
+        if out.returncode == 0 and out.stdout.strip().isdigit():
+            return int(out.stdout.strip()) - int(time.time())
+    return 0
+
+ACCESS_LOGS = {
+    "squid-cache-0": "/tmp/opencode/cache0-prev.log",
+    "squid-cache-1": "/tmp/opencode/cache1-prev.log",
+}
+
+def accesslog(pod, s, e):
+    """return {status: (reqs, bytes)} in window from the pod's PREVIOUS
+    container access.log (saved locally): the current container's access.log
+    was recreated at its last restart (~2min of data), while the previous
+    container covers the whole test window. Lines are 'epoch.ms ... status
+    size ...' (cache.log noise starts with a date string, not a bare epoch).
+    pod IP filtering was tried but Volcano rebuilds pods between the traffic
+    window and analysis time, so recorded client IPs do not match any
+    current pod."""
+    path = ACCESS_LOGS.get(pod)
+    if not path:
+        return {}
     res = {}
-    for line in out.stdout.splitlines():
-        parts = line.split()
-        if len(parts) == 3:
-            res[parts[0]] = (int(parts[1]), int(parts[2]))
+    try:
+        with open(path) as f:
+            for line in f:
+                p = line.split()
+                if len(p) >= 5 and p[0].find(".") > 0 and p[0].replace(".", "", 1).isdigit():
+                    ts = float(p[0])
+                    if s <= ts <= e:
+                        st = p[3].split("/")[0]
+                        try:
+                            n, b = res.get(st, (0, 0))
+                            res[st] = (n + 1, b + int(p[4]))
+                        except ValueError:
+                            pass
+    except FileNotFoundError:
+        pass
     return res
 
 def classify(stats):
@@ -50,8 +95,9 @@ def classify(stats):
             miss += b
     return hit / 1048576, miss / 1048576
 
-# timeline
+# timeline (job name rides on every action line)
 tl = {}
+jobs = {}
 with open(f"{LOGDIR}/timeline.tsv") as f:
     for line in f:
         parts = line.strip().split("\t")
@@ -60,16 +106,27 @@ with open(f"{LOGDIR}/timeline.tsv") as f:
         ts, case, action, job = parts
         if action in ("SUBMIT", "DONE", "FAILED"):
             tl.setdefault(case, {})[action] = int(ts)
+            jobs[case] = job
 
 cases = sorted(tl.keys())
 print(f"{'case':<22} {'out_MB':>9} {'origin_MB':>9} {'回源%':>7} {'HIT_MB':>8} {'MISS_MB':>8} {'HIT%':>6}")
 results = {}
-for c in cases:
+off = cluster_offset()  # cluster epoch − local epoch (add to local windows)
+if off:
+    print(f"    [cluster clock is {off:+d}s ahead of local]", file=sys.stderr)
+for idx, c in enumerate(cases):
     t = tl[c]
     s = t["SUBMIT"]
-    # Volcano marks the Job Completed while late-batch pods are still
-    # streaming; extend the window past DONE to capture the tail traffic.
-    e = t.get("DONE", t.get("FAILED", t["SUBMIT"] + 60)) + 180
+    # DONE from wait_pods_done is already the true end of traffic (all pods
+    # finished), so no tail buffer is needed — and cases run back-to-back, so
+    # DONE+180 would swallow the NEXT case's traffic. Clamp e to the next
+    # case's SUBMIT (and never before DONE).
+    done = t.get("DONE", t.get("FAILED", s + 60))
+    nxt = tl[cases[idx + 1]]["SUBMIT"] if idx + 1 < len(cases) else done + 60
+    e = min(done, nxt) if done > s else s + 60
+    if done > nxt:  # overlapping runs (next case submitted before this one
+        e = done     # finished): keep this case's own tail anyway
+    s, e = s + off, e + off  # access.log / prometheus use cluster time
     co = delta("squid_client_http_kbytes_out_kbytes_total", s, e)
     oi = delta("squid_server_http_kbytes_in_kbytes_total", s, e)
     hit_t = miss_t = 0.0
