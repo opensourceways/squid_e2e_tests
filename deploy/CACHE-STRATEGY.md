@@ -249,3 +249,48 @@ refresh_pattern . 0 20% 4320
   每分钟 ~10-20 条，持续 24/7。与 case 流量无关；analyze 需过滤 `NONE_NONE` 状态。
 - **access.log 时间戳**：第 1 列为 epoch 秒（毫秒小数），grep HH:MM 匹配不到，须用
   epoch 窗口过滤。
+
+### 10.2 冷缓存回归崩溃排障记录（2026-08-14，r5 复测）
+
+**背景**：清空 squid 缓存后重跑 16-tool 回归，squid 在两副本上反复崩溃
+（`restartCount` 6/4，exit 139 = SIGSEGV），导致 access.log 重建 + exporter 计数重置，
+r5 回归数据全部无效。
+
+**现象**：
+- 崩溃前 access.log 出现大量 `TCP_SWAPFAIL_MISS`（replica-0 625 次、replica-1 **1840 次**）
+- cache.log（`--previous` 容器日志）：`FATAL: assertion failed: store_swapout.cc:276:
+  "mem->swapout.sio == self"`
+- kubelet events：Liveness/Readiness probe `connection refused`（进程已死）或
+  `context deadline exceeded`（进程卡死，NFS 写盘阻塞）
+- 附带影响：case 09/15/16 报 `Unable to connect to squid-cache:3128` 失败
+
+**根因链**：
+1. **Squid 7.6 稳定版本身的双写竞态**（非开发版）：alpine 包从 `SQUID_7_6` 官方 tag 构建，
+   `-VCS` 后缀仅表示 GitHub tag tarball 构建；upstream master 至今无修复提交，
+   断言仍在 `store_swapout.cc:276`
+2. 同一 URL 被 10 并发 pod 请求（冷缓存全 MISS）→ 首个写盘失败（SWAPFAIL）→ entry 释放 →
+   第二个写操作复用同一 `mem->swapout.sio` → 断言检测到状态损坏 → FATAL
+3. **写盘失败的诱因**：SFS Turbo 共享 volume（`sfsturbo-subpath-sc`，500G）92% 满
+   （n v-action-vllm-benchmarks-gy006 132.9G + squid registry-cache 75.5G 为大头），
+   节点 dmesg 有 140 次 `nfs: server 172.22.6.2 not responding`
+4. 暖缓存不崩溃的原因：几乎全 HIT 不写盘 → 无 SWAPFAIL → 无竞态
+
+**小规模验证**（单 case 02 冷缓存，10 pod）：**未复现崩溃**，SWAPFAIL=0，
+HIT 357.8MB / MISS 189.3MB = **65.4%**（首个 pod MISS，后 9 个 HIT，符合预期）。
+结论：崩溃需要"累计写盘量 + SFS 高水位"的组合，单 case 写盘量太小不触发。
+
+**修复方向**（按优先级）：
+1. 释放 SFS 空间：清理 squid 自身 registry-cache（75.5G，buildkitd 镜像缓存）；
+   nv-action 132.9G 属其他租户
+2. `collapsed_forwarding on`：并发同 URL 请求共享一次回源写盘，降低竞态窗口
+3. storeio 换 `aufs`/`diskd`（异步 IO），或 cache_dir 迁出共享 NFS
+4. 调高 probe 超时只能掩盖症状，不能根治
+
+**新增测试基建坑**：
+- **vj Completed 早于 pod 实际调度**：Volcano 可能在任何 pod 出现前就标记 vj Completed，
+  `wait_pods_done` 对"0 个 pod"直接返回成功 → timeline DONE 时间戳早于实际流量
+  （实测差 2 分钟，DONE 08:29:44 vs pod 实际 08:31:07 运行）。已修复：helper 需先
+  `seen` 到至少一个 pod 才认可"全部结束"
+- **purge 重启慢**：清缓存 + `squid -k shutdown` 后，容器 init 会重新 `apk add`
+  （USTC 镜像）+ `squid -z` 建目录，启动期可达数分钟；期间 probe 失败可能导致
+  kubelet 再杀一次 → 需等待稳定 Running 后再提交测试
