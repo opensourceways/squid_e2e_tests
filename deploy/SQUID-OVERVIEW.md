@@ -1,5 +1,8 @@
 # Squid Caching Forward Proxy — Overview, Scenarios & Usage
 
+> 缓存策略逐条审计与 CI 场景推荐配置：见 **[CACHE-STRATEGY.md](CACHE-STRATEGY.md)**（含 13 条
+> refresh_pattern 裁决、选项有效性表、可变/不可变源站分类、行动清单）。
+
 ## 1. What it is
 
 A caching forward proxy (MITM/SSL-bump) deployed in the `squid` namespace of the gy006 cluster, plus an optional registry cache sidecar. Everything is defined in `deploy/chart` (Helm chart):
@@ -343,13 +346,14 @@ maximum_object_size 8192 MB                 # never cache objects >8GB
 
 **TTL — `refresh_pattern`** (first match wins, checked top-down):
 
-| Pattern | min | percent | max | Effect (TTL = min if age < min; age+percent·age otherwise; capped at max) |
+| Pattern | min | percent | max | Effect (lifetime = (Date-LM)·percent if LM present, else min; capped at max) |
 |---|---|---|---|---|
-| `\.whl$ .tar.gz$ .deb$` | 10080 | 100% | 525960 | wheels/tarballs/debs: never revalidate — cache up to **1 year** (10080 min = 7 d floor, 525960 min = 365 d ceiling) |
+| `\.whl$ .tar.gz$ .deb$ .crate$ .zip$ .(pth\|pt\|safetensors)$` | 10080 | 100% | 525960 | immutable artifacts: never revalidate — 7 d floor, 365 d ceiling |
 | pypi/golang/docker/debian/ubuntu hosts | 0 | 20% | 4320 | package metadata: revalidate often (20% of age), max **3 days** |
 | `.` (catch-all) | 0 | 20% | 4320 | default |
 
-- `ignore-reload override-expire ignore-no-cache` on the big-file lines: **client `Cache-Control: no-cache` / `Pragma: no-cache` are ignored** — CI tools that send reload directives still get cache hits.
+- `ignore-reload override-expire ignore-no-store` on the artifact lines: **client `Cache-Control: no-cache` / `Pragma: no-cache` are ignored**, origin `no-store` is ignored — CI tools that send reload directives still get cache hits.
+- NOTE (verified on squid 7.6): `ignore-no-cache` was removed in squid 4+ and `override-vary` is unknown (logs ERROR) — **do not use either**. Origin `no-cache` is enforced as must-revalidate (304 per request, small overhead).
 - Squid obeys HTTP `Expires`/`max-age` when present; `refresh_pattern` only fills in when the response has no cache headers.
 - `reply_header_replace Vary Accept-Encoding` — strips `Vary` so compressed/plain variants share one cache entry (avoids duplicate storage + misses).
 
