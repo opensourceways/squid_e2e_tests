@@ -68,6 +68,25 @@ STALE    = age > max                            # max 是硬上限（7.6 警告 
 | `reload-into-ims` | ✅ 有效 | 客户端 reload → 转 If-Modified-Since | 未启用 |
 
 **关键约束**：源站 `Cache-Control: no-cache` 的响应**每个请求都回源 304 验证**，配置无法关闭。
+
+### 3.3 匹配顺序与"截胡"效应（域名规则 = 元数据兜底）
+
+refresh_pattern 是**顺序优先**（第一个匹配的规则生效，无最长匹配）。当前 15 条规则的排列
+刻意把**扩展名 immutable 规则放在域名规则之前**，产生截胡效应：
+
+| 域名规则 | 扩展名规则截胡后，实际覆盖范围 | 分类 |
+|---|---|---|
+| `\.pypi\.org/.*` | 纯 `simple/` 索引页（制品在 files.pythonhosted.org，pypi.org 无制品） | ✅ 纯元数据 |
+| `\.golang\.org` + `proxy\.golang\.org` | `@v/list`/`.info`/`.mod` 元数据 + 内容寻址 `.zip`（未截胡，go zip 无扩展名规则） | ⚠️ 混合 |
+| `\.debian\.org` + `\.ubuntu\.com` | `dists/.../InRelease`/`Packages.gz`/`Release` 索引；`pool/*.deb` 已被 `\.deb$` 截胡 | ⚠️ 元数据为主 |
+| catch-all `.` | 未分类：git 对象、conda、yum、npm 等 | 兜底 |
+
+**推论**：
+- `0 20% 4320` 对纯元数据=正确（易变，靠 LM/短窗口）；对混合域名=保守兜底（制品若源站带
+  缓存头仍可靠 LM 命中，go .zip 内容寻址受益于此）
+- **顺序敏感**：若把域名规则移到扩展名规则之前（或误删扩展名规则），`.deb`/`.whl` 会落入
+  域名规则 → 从 immutable 跌为 `0 20% 4320`，重负载 apt/pip 命中率回落
+- §5 的"死规则"判定（pythonhosted 等）同样基于此机制
 命中率天花板 = 源站发 no-cache 的对象比例（实测 16 工具大多 89-100%，说明 CI 对象大多不带 no-cache）。
 
 ### 3.3 Vary 与缓存键
