@@ -83,6 +83,22 @@ wait_case() { # job → rc; wait for the Volcano Job itself (pods may be
   return 1
 }
 
+wait_pods_done() { # job → rc; wait until ALL pods of the job have finished.
+                   # Volcano may mark the Job Completed while late-batch pods
+                   # are still running (minAvailable=1 batches), so DONE must
+                   # reflect the true end of traffic.
+  local job="$1" left
+  local end=$(( $(date +%s) + 1800 ))
+  while [ "$(date +%s)" -lt "$end" ]; do
+    left=$(kc get pods -n "$NS" -l "volcano.sh/job-name=$job" -o jsonpath='{range .items[*]}{.status.phase}{" "}{end}' 2>/dev/null \
+             | tr ' ' '\n' | grep -cE 'Running|Pending|ContainerCreating|Unknown' || true)
+    [ "$left" = "0" ] && return 0
+    sleep 10
+  done
+  echo "  wait_pods_done TIMEOUT" >&2
+  return 1
+}
+
 for c in "${CASES[@]}"; do
   name=$(basename "$(ls "$TOOL_DIR/$c"*.yaml | head -1)" .yaml)
   echo "== case $c ($name): submitting replicas=10 =="
@@ -91,6 +107,7 @@ for c in "${CASES[@]}"; do
   sleep 5
   if wait_case "$job"; then
     sleep 5
+    wait_pods_done "$job" || true
     mkdir -p "$LOG_DIR/$c-$name"
     i=0
     for pod in $(kc get pods -n "$NS" -l "volcano.sh/job-name=$job" -o name 2>/dev/null | cut -d/ -f2); do

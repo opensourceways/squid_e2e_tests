@@ -66,7 +66,10 @@ print(f"{'case':<22} {'out_MB':>9} {'origin_MB':>9} {'回源%':>7} {'HIT_MB':>8}
 results = {}
 for c in cases:
     t = tl[c]
-    s, e = t["SUBMIT"], t.get("DONE", t.get("FAILED", t["SUBMIT"] + 60))
+    s = t["SUBMIT"]
+    # Volcano marks the Job Completed while late-batch pods are still
+    # streaming; extend the window past DONE to capture the tail traffic.
+    e = t.get("DONE", t.get("FAILED", t["SUBMIT"] + 60)) + 180
     co = delta("squid_client_http_kbytes_out_kbytes_total", s, e)
     oi = delta("squid_server_http_kbytes_in_kbytes_total", s, e)
     hit_t = miss_t = 0.0

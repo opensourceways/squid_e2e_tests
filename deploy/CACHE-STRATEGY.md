@@ -213,7 +213,20 @@ refresh_pattern . 0 20% 4320
 ## 10. 实测证据附录
 
 - 16-tool 并发测试：`traffic-test/TOOL-RESULTS.md`（含 cargo 11%→95%、wget 60%→100% 前后对比）
+- 0.1.6 策略复测（2026-08-14，r3/r4 窗口修正后）：01 pip=99.9%、08 bazel=99.9%（7.4GB HIT）、09 npm=99.9%
 - PVC 触底：`traffic-test/PVC-PERF-RESULTS.md`（单连接 42MB/s，聚合上限 ~400MB/s）
 - 响应头实测：codeload branch zip（无 Cache-Control+ETag）、HF resolve（302+no-store+签名 URL）、
   GitHub release（no-cache）、git smart HTTP（POST/GET 确认）
 - squid 7.6 选项有效性：`squid.conf.documented` 对照 + cache.log 报错采集
+
+### 10.1 测试基建已知坑（r3/r4 实测）
+
+- **Volcano 分批调度**：`minAvailable=1` 时 job pods 分批创建/运行，vj 状态 `Completed`
+  可能早于最后一批 pods 的流量结束（实测差 1-3 分钟）→ analyze 窗口必须加尾部缓冲
+  （`DONE+180s`），否则 case 窗口内只剩背景流量，HIT% 假性为 0（case 01 曾误报 0%）。
+- **背景 TLS 噪音**：集群内存在未知客户端（源 IP 不在任何 pod/Service 列表，疑似跨 VPC
+  或已删 pod 残留连接）每 1-5s 对 `api.github.com:443` 发 CONNECT + TLS 握手失败
+  （`Cannot accept a TLS connection`，detail `A000412` = SSL alert `bad certificate`），
+  每分钟 ~10-20 条，持续 24/7。与 case 流量无关；analyze 需过滤 `NONE_NONE` 状态。
+- **access.log 时间戳**：第 1 列为 epoch 秒（毫秒小数），grep HH:MM 匹配不到，须用
+  epoch 窗口过滤。
