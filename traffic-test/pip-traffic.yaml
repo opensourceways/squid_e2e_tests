@@ -1,0 +1,170 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: test-traffic-pip-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-traffic-pip
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 3600
+  tasks:
+    - name: test-traffic-pip
+      replicas: 10
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+              command:
+                - bash
+                - -c
+              args:
+                - |
+                  #!/bin/bash
+                  set -e
+                  echo "== task: $(hostname) =="
+                  sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.huaweicloud.com/ubuntu-ports|g' \
+                    /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
+                  apt-get update -qq 2>&1 | tail -1 || true
+                  apt-get install -y -qq git python3 python3-pip curl 2>&1 | tail -2 || { apt-get update -qq 2>&1 | tail -1 || true; apt-get install -y -qq git python3 python3-pip curl 2>&1 | tail -2; }
+                  T_START=$(date +%s%3N)
+
+                  echo ""
+                  echo "=========================================="
+                  echo "1) git clone real repo (gitcode.com/Ascend/pytorch)"
+                  echo "=========================================="
+                  T0=$(date +%s%3N)
+                  git clone --depth 1 --quiet https://gitcode.com/ascend/pytorch.git /workspace/pytorch
+                  T1=$(date +%s%3N)
+                  SIZE=$(du -sb /workspace/pytorch 2>/dev/null | awk '{print $1}')
+                  echo "clone pytorch (depth1): $(( (T1 - T0) ))ms, size=${SIZE}B"
+
+                  echo ""
+                  echo "=========================================="
+                  echo "2) real requirements.txt from the repo"
+                  echo "=========================================="
+                  grep -vE '^\s*(#|$|--)' /workspace/pytorch/requirements.txt || true
+
+                  echo ""
+                  echo "=========================================="
+                  echo "3) bulk pip download (simulates 10 parallel CI installs)"
+                  echo "   real packages: repo requirements + common CI deps + torch 146MB wheel"
+                  echo "=========================================="
+                  mkdir -p /tmp/wheels
+                  T0=$(date +%s%3N)
+                  pip download --no-deps --no-cache-dir -v \
+                    --index-url https://repo.huaweicloud.com/repository/pypi/simple \
+                    -d /tmp/wheels \
+                    pyyaml setuptools auditwheel \
+                    numpy psutil requests tqdm regex pygments flask fastapi pydantic \
+                    torch==2.10.0 \
+                    2>&1 | grep -oE "Saved .*" || true
+                  T1=$(date +%s%3N)
+                  BYTES=$(du -sb /tmp/wheels 2>/dev/null | awk '{print $1}')
+                  COUNT=$(ls /tmp/wheels 2>/dev/null | wc -l)
+                  MS=$((T1 - T0))
+                  echo "pip download: $COUNT files, ${BYTES:-0} bytes, ${MS}ms"
+                  if [ "${BYTES:-0}" -gt 0 ] && [ "$MS" -gt 0 ]; then
+                    echo "pip aggregate bandwidth: $(( BYTES * 1000 / MS )) B/s"
+                  fi
+
+                  echo ""
+                  echo "=========================================="
+                  echo "4) pip install the small packages (real install phase)"
+                  echo "=========================================="
+                  T0=$(date +%s%3N)
+                  pip install --quiet --break-system-packages --no-cache-dir \
+                    --index-url https://repo.huaweicloud.com/repository/pypi/simple \
+                    pyyaml setuptools auditwheel numpy psutil requests tqdm regex pygments flask fastapi pydantic
+                  T1=$(date +%s%3N)
+                  echo "pip install small pkgs: $((T1 - T0))ms"
+
+                  T_END=$(date +%s%3N)
+                  echo ""
+                  echo "DURATION: $((T_END - T_START))ms"
+                  echo "== done $(hostname) =="
+              lifecycle:
+                postStart:
+                  exec:
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set +e
+                        P=/etc/squid-ca/squid-ca.pem
+                        if [ -f "$P" ]; then
+                          if [ -d /etc/pki/ca-trust/source/anchors ]; then      # RHEL/openEuler
+                            cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                            update-ca-trust extract >/dev/null 2>&1
+                          else                                                   # Debian/Ubuntu
+                            cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                            update-ca-certificates -f >/dev/null 2>&1
+                          fi
+                        fi
+                        if command -v apt-get >/dev/null 2>&1 && [ -n "$HTTPS_PROXY" ]; then
+                          mkdir -p /etc/apt/apt.conf.d
+                          printf 'Acquire::http::Proxy "%s";\nAcquire::https::Proxy "%s";\n' \
+                            "$HTTPS_PROXY" "$HTTPS_PROXY" > /etc/apt/apt.conf.d/99squid-proxy
+                        fi
+                        exit 0
+              workingDir: /workspace
+              resources:
+                limits:
+                  cpu: "2"
+                  memory: 2Gi
+                requests:
+                  cpu: "2"
+                  memory: 2Gi
+              env:
+                - name: WORKSPACE
+                  value: /workspace
+                - name: HTTP_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: HTTPS_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: http_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: https_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: NO_PROXY
+                  value: "localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+                - name: no_proxy
+                  value: "localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+                - name: SSL_CERT_FILE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: CURL_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: REQUESTS_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: PIP_CERT
+                  value: /etc/squid-ca/squid-ca.pem
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true
+          nodeSelector:
+            kubernetes.io/arch: arm64
+          imagePullSecrets:
+            - name: huawei-swr-image-pull-secret-model-gy
+          activeDeadlineSeconds: 3600
+          securityContext:
+            runAsUser: 0
+          restartPolicy: Never

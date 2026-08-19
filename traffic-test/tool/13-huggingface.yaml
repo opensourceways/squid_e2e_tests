@@ -1,11 +1,11 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  generateName: test-squid-cachedemo-
+  generateName: test-squid-hf-
   namespace: squid
   labels:
     kubernetes.io/arch: arm64
-    pipeline/run-id: test-squid-cachedemo
+    pipeline/run-id: test-squid-hf
 spec:
   policies:
     - event: PodFailed
@@ -15,7 +15,7 @@ spec:
   minAvailable: 1
   ttlSecondsAfterFinished: 1800
   tasks:
-    - name: test-squid-cachedemo
+    - name: test-squid-hf
       replicas: 1
       maxRetry: 1
       template:
@@ -33,56 +33,45 @@ spec:
                   sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.huaweicloud.com/ubuntu-ports|g' \
                     /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
                   apt-get update -qq 2>&1 | tail -2 || true
-                  apt-get install -y -qq python3 python3-pip curl wget 2>&1 | tail -3 || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq python3 python3-pip curl wget 2>&1 | tail -3; }
+                  apt-get install -y -qq python3 python3-pip 2>&1 | tail -3 || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq python3 python3-pip 2>&1 | tail -3; }
+                  T_START=$(date +%s%3N)
+                  export HF_ENDPOINT=https://hf-mirror.com
+                  echo ""
+                  echo "=========================================="
+                  echo "Scenario 13: huggingface_hub (snapshot_download / hf download —"
+                  echo "              328 files across pytorch, MindSpeed-MM, DrivingSDK...)"
+                  echo "=========================================="
+
+                  echo "--- Install huggingface_hub (pip wheel via squid) ---"
+                  pip install -q --break-system-packages -i https://mirrors.huaweicloud.com/repository/pypi/simple huggingface_hub 2>&1 | tail -1
+                  hf --version
+
+                  # tiny-gpt2: config ~2MB + LFS-weights pytorch_model.bin (2.5MB) —
+                  # the model-download pattern from pytorch/benchmarks/llm/download_hf.py
+                  MODEL="sshleifer/tiny-gpt2"
+
+                  echo ""
+                  echo "--- hf download (cold, via cdn-lfs.huggingface.co) ---"
+                  T0=$(date +%s%3N)
+                  hf download "$MODEL" --local-dir /tmp/hf 2>&1 | tail -4
+                  T1=$(date +%s%3N)
+                  echo "fetch: $((T1 - T0))ms, $(du -sh /tmp/hf | cut -f1)"
+
+                  echo ""
+                  echo ""
+                  echo "--- python API check (snapshot_download — the actual org pattern) ---"
+                  python3 - << 'EOF'
+                  from huggingface_hub import snapshot_download
+                  p = snapshot_download("sshleifer/tiny-gpt2", local_dir="/tmp/hf-snap")
+                  import os
+                  print("✅ snapshot_download OK:", p, "| files:", len(os.listdir(p)))
+                  EOF
 
                   echo ""
                   echo "=========================================="
-                  echo "Squid Cache Demo: same 12 packages, fetched TWICE"
-                  echo "  Round 1 = cold cache (MISS, populates cache)"
-                  echo "  Round 2 = warm cache (HIT, served from squid disk)"
-                  echo "  Same pod, same network path — only cache state differs"
-                  echo "=========================================="
-
-                  # A larger basket biased toward BIG wheels (numpy/pandas/scipy
-                  # class packages, tens of MB each) so the cache win is obvious —
-                  # small wheels are already fast enough that caching barely shows.
-                  # All traffic here goes through squid (HTTP_PROXY is set).
-                  PACKAGES="numpy pandas scipy matplotlib pillow \
-                            pyarrow grpcio protobuf opencv-python-headless \
-                            scikit-learn"
-
-                  fetch_round () {
-                    local round="$1"
-                    rm -rf /tmp/wheels-$round; mkdir -p /tmp/wheels-$round
-                    T0=$(date +%s%3N)
-                    pip download --no-deps --no-cache-dir \
-                      --index-url https://mirrors.huaweicloud.com/repository/pypi/simple \
-                      -d /tmp/wheels-$round $PACKAGES > /tmp/pipdl-$round.log 2>&1 || true
-                    T1=$(date +%s%3N)
-                    local ms=$((T1 - T0))
-                    local bytes=$(du -sb /tmp/wheels-$round 2>/dev/null | awk '{print $1}')
-                    local count=$(ls /tmp/wheels-$round 2>/dev/null | wc -l)
-                    echo "ROUND_${round}: ${count} files, ${bytes:-0} bytes, ${ms}ms"
-                    if [ "${bytes:-0}" -gt 0 ] && [ "$ms" -gt 0 ]; then
-                      echo "ROUND_${round}_SPEED: $(( bytes * 1000 / ms )) B/s"
-                    fi
-                  }
-
-                  echo ""
-                  echo "--- Round 1 (COLD — cache MISS expected) ---"
-                  fetch_round 1
-
-                  echo ""
-                  echo "--- Round 2 (WARM — cache HIT expected) ---"
-                  fetch_round 2
-
-                  echo ""
-                  echo "--- File sizes fetched ---"
-                  ls -lhS /tmp/wheels-1 | head -6 | awk '{print $5, $9}'
-
-                  echo ""
-                  echo "=========================================="
-                  echo "✅ Cache demo completed."
+                  T_END=$(date +%s%3N)
+                  echo "DURATION: $((T_END - T_START))ms"
+                  echo "✅ Scenario 13 completed."
                   echo "=========================================="
               lifecycle:
                 postStart:
@@ -92,6 +81,17 @@ spec:
                       - -c
                       - |
                         set +e
+
+                        # Bazel JVM trust: point JVM at the mounted squid-CA keystore
+                        # (Bazel ignores JAVA_TOOL_OPTIONS; args must come via .bazelrc)
+                        cat > "$WORKSPACE/.bazelrc" << 'EOF'
+                        common --noenable_bzlmod
+                        common --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/
+                        build --cxxopt=-std=c++17
+                        startup --host_jvm_args=-Djavax.net.ssl.trustStore=/etc/squid-bazel-trust/squid-bazel-trust.jks
+                        startup --host_jvm_args=-Djavax.net.ssl.trustStorePassword=changeit
+                        EOF
+
                         P=/etc/squid-ca/squid-ca.pem
                         if [ -f "$P" ]; then
                           if [ -d /etc/pki/ca-trust/source/anchors ]; then
@@ -102,10 +102,12 @@ spec:
                             update-ca-certificates -f >/dev/null 2>&1
                           fi
                         fi
-                        if command -v apt-get >/dev/null 2>&1; then
+
+                        if command -v apt-get >/dev/null 2>&1 && [ -n "$HTTPS_PROXY" ]; then
                           mkdir -p /etc/apt/apt.conf.d
                           printf 'Acquire::http::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\nAcquire::https::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\n' > /etc/apt/apt.conf.d/99squid-proxy
                         fi
+
                         exit 0
               workingDir: /workspace
               resources:
@@ -116,6 +118,8 @@ spec:
                   cpu: "2"
                   memory: 2Gi
               env:
+                - name: WORKSPACE
+                  value: /workspace
                 - name: HTTP_PROXY
                   value: "http://squid-cache.squid.svc.cluster.local:3128"
                 - name: HTTPS_PROXY
@@ -140,6 +144,8 @@ spec:
                   value: /etc/squid-ca/squid-ca.pem
                 - name: NODE_EXTRA_CA_CERTS
                   value: /etc/squid-ca/squid-ca.pem
+                - name: HF_HUB_ENABLE_HF_TRANSFER
+                  value: "0"
               volumeMounts:
                 - name: squid-ca
                   mountPath: /etc/squid-ca
@@ -156,7 +162,7 @@ spec:
             kubernetes.io/arch: arm64
           imagePullSecrets:
             - name: huawei-swr-image-pull-secret-model-gy
-          activeDeadlineSeconds: 1200
+          activeDeadlineSeconds: 2400
           securityContext:
             runAsUser: 0
           restartPolicy: Never

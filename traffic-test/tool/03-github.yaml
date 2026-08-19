@@ -1,11 +1,11 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  generateName: test-squid-bazel-
+  generateName: test-squid-github-
   namespace: squid
   labels:
     kubernetes.io/arch: arm64
-    pipeline/run-id: test-squid-bazel
+    pipeline/run-id: test-squid-github
 spec:
   policies:
     - event: PodFailed
@@ -15,14 +15,14 @@ spec:
   minAvailable: 1
   ttlSecondsAfterFinished: 1800
   tasks:
-    - name: test-squid-bazel
+    - name: test-squid-github
       replicas: 1
       maxRetry: 1
       template:
         spec:
           containers:
             - name: test
-              image: swr.cn-north-4.myhuaweicloud.com/memfabric-hybrid/memfabric-hybrid_arm:multi_python_v3
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
               command:
                 - bash
                 - -c
@@ -30,83 +30,31 @@ spec:
                 - |
                   #!/bin/bash
                   set -e
-                  set -o pipefail
 
-                  echo ""
-                  echo "=========================================="
-                  echo "Scenario 8: bazel http_archive (pattern: msdebug, memfabric_hybrid)"
-                  echo "=========================================="
-
-                  echo "--- Create WORKSPACE with http_archive (googletest) ---"
-                  cd "$WORKSPACE"
-                  echo "--- wait for postStart to write .bazelrc with JVM trust args ---"
-                  for i in $(seq 1 30); do
-                    grep -q 'trustStorePassword' .bazelrc 2>/dev/null && break
-                    sleep 1
-                  done
-
-                  cat >> "$WORKSPACE/.bazelrc" << 'EOF'
-                  common --noenable_bzlmod
-                  common --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/
-                  build --cxxopt=-std=c++17
-                  EOF
-
-                  cat > WORKSPACE << 'EOF'
-                  load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-                  http_archive(
-                      name = "googletest",
-                      urls = ["https://gh-proxy.test.osinfra.cn/https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz"],
-                      strip_prefix = "googletest-1.17.0",
-                  )
-                  # Bazel's own toolchain resolution implicitly fetches bazel_skylib
-                  # from a hardcoded github.com URL (not covered by --registry, since
-                  # this is WORKSPACE mode). Override it here to route through gh-proxy,
-                  # since direct github.com connections from this cluster time out.
-                  http_archive(
-                      name = "bazel_skylib",
-                      urls = ["https://gh-proxy.test.osinfra.cn/https://github.com/bazelbuild/bazel-skylib/releases/download/1.6.1/bazel-skylib-1.6.1.tar.gz"],
-                  )
-                  # Same reasoning: rules_cc's default fetch also hits github.com directly.
-                  http_archive(
-                      name = "rules_cc",
-                      urls = ["https://gh-proxy.test.osinfra.cn/https://github.com/bazelbuild/rules_cc/releases/download/0.0.9/rules_cc-0.0.9.tar.gz"],
-                      strip_prefix = "rules_cc-0.0.9",
-                  )
-                  # Same: rules_python is another DEFAULT.WORKSPACE.SUFFIX implicit dep
-                  # fetched from hardcoded github.com (observed failing through squid).
-                  # NOTE: must use bazel-contrib org — bazelbuild/rules_python 301-redirects
-                  # to bazel-contrib and gh-proxy returns 502 on the redirect chain.
-                  http_archive(
-                      name = "rules_python",
-                      urls = ["https://gh-proxy.test.osinfra.cn/https://github.com/bazel-contrib/rules_python/releases/download/0.24.0/rules_python-0.24.0.tar.gz"],
-                      strip_prefix = "rules_python-0.24.0",
-                  )
-                  EOF
-                  cat > BUILD.bazel << 'EOF'
-                  cc_test(
-                      name = "hello_test",
-                      size = "small",
-                      srcs = ["hello_test.cc"],
-                      deps = ["@googletest//:gtest_main"],
-                  )
-                  EOF
-                  cat > hello_test.cc << 'EOF'
-                  #include <gtest/gtest.h>
-                  TEST(Smoke, True) { EXPECT_EQ(1, 1); }
-                  EOF
-
-                  echo "--- bazel test (downloads bazel dist + http_archive via squid) ---"
+                  sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.huaweicloud.com/ubuntu-ports|g' \
+                    /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
+                  apt-get update -qq 2>&1 | tail -2 || true
+                  apt-get install -y -qq curl git 2>&1 | tail -3 || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq curl git 2>&1 | tail -3; }
+                  git config --global url."https://gh-proxy.test.osinfra.cn/https://github.com".insteadOf "https://github.com" || echo "WARNING: git config failed for github"
+                  git config --global --get-regexp 'url\.' 2>/dev/null | head -1
                   T_START=$(date +%s%3N)
-                  bazel test //:hello_test --test_output=errors --verbose_failures 2>&1 | tail -60
-                  T_END=$(date +%s%3N)
-                  echo "bazel test: $((T_END - T_START))ms"
-                  echo "✅ bazel http_archive fetched + test passed"
 
                   echo ""
+                  echo "=========================================="
+                  echo "Scenario 3: GitHub access through proxy"
+                  echo "=========================================="
+
+                  echo "--- git clone (depth=1) ---"
+                  cd /tmp
+                  git clone --depth=1 https://github.com/vllm-project/vllm-ascend.git 2>&1 | tail -3
+                  echo "✅ git clone completed"
+                  ls vllm-ascend/ | head -5
+
                   echo ""
                   echo "=========================================="
+                  T_END=$(date +%s%3N)
                   echo "DURATION: $((T_END - T_START))ms"
-                  echo "✅ Scenario 8 completed."
+                  echo "✅ Scenario 3 completed."
                   echo "=========================================="
               lifecycle:
                 postStart:
@@ -120,6 +68,9 @@ spec:
                         # Bazel JVM trust: point JVM at the mounted squid-CA keystore
                         # (Bazel ignores JAVA_TOOL_OPTIONS; args must come via .bazelrc)
                         cat > "$WORKSPACE/.bazelrc" << 'EOF'
+                        common --noenable_bzlmod
+                        common --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/
+                        build --cxxopt=-std=c++17
                         startup --host_jvm_args=-Djavax.net.ssl.trustStore=/etc/squid-bazel-trust/squid-bazel-trust.jks
                         startup --host_jvm_args=-Djavax.net.ssl.trustStorePassword=changeit
                         EOF
@@ -164,6 +115,7 @@ spec:
                   value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
                 - name: no_proxy
                   value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+
                 - name: SSL_CERT_FILE
                   value: /etc/squid-ca/squid-ca.pem
                 - name: CURL_CA_BUNDLE
@@ -180,9 +132,6 @@ spec:
                 - name: squid-ca
                   mountPath: /etc/squid-ca
                   readOnly: true
-                - name: squid-bazel-trust
-                  mountPath: /etc/squid-bazel-trust
-                  readOnly: true
           volumes:
             - name: squid-ca
               secret:
@@ -190,10 +139,6 @@ spec:
                 items:
                   - key: squid-ca.pem
                     path: squid-ca.pem
-                optional: true
-            - name: squid-bazel-trust
-              configMap:
-                name: squid-bazel-trust
                 optional: true
           nodeSelector:
             kubernetes.io/arch: arm64
