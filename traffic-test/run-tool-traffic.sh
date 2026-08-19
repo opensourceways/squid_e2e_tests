@@ -18,7 +18,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 TOOL_DIR="${TOOL_DIR:-$DIR/tool}"
 GEN="$DIR/gen-replicas.py"
 GEN_DIR="$DIR/traffic-gen"
-LOG_DIR="$DIR/logs/tool"
+LOG_DIR="${LOG_DIR:-$DIR/logs/tool}"
 MONITOR=0
 MONITOR_DUR=7200
 

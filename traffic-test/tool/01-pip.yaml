@@ -63,12 +63,11 @@ spec:
                   echo "=========================================="
                   echo "Real-world requirements: vllm-project/vllm-ascend"
                   echo "=========================================="
-                  echo "--- fetching requirements.txt (via proxy, jsdelivr CDN mirror —"
-                  echo "    raw.githubusercontent.com hits a known squid github-rewrite.py bug:"
-                  echo "    it rewrites the URL for an already-open bumped-TLS connection to the"
-                  echo "    real github host, corrupting the Host header → GitHub 404) ---"
-                  curl -s -o /tmp/vllm-ascend-requirements.txt \
-                    https://cdn.jsdelivr.net/gh/vllm-project/vllm-ascend@main/requirements.txt
+                  echo "--- fetching requirements.txt via gh-proxy (raw.githubusercontent.com"
+                  echo "    direct is slow/unreachable from cn clusters; gh-proxy is the"
+                  echo "    verified fast path) ---"
+                  curl -sS -w 'gh-proxy fetch: HTTP=%{http_code} size=%{size_download}\n' -o /tmp/vllm-ascend-requirements.txt \
+                    'https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/vllm-project/vllm-ascend/main/requirements.txt'
                   wc -l /tmp/vllm-ascend-requirements.txt
 
                   echo ""

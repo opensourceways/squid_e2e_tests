@@ -44,18 +44,6 @@ spec:
                   echo "Scenario 3: GitHub access through proxy"
                   echo "=========================================="
 
-                  echo "--- github.com reachability ---"
-                  echo -n "HTTPS GET github.com              → "
-                  curl -s -o /dev/null -w "%{http_code} (%{time_total}s)\n" https://github.com || echo "❌ FAILED"
-
-                  echo -n "HTTPS GET api.github.com          → "
-                  curl -s -o /dev/null -w "%{http_code} (%{time_total}s)\n" https://api.github.com || echo "❌ FAILED"
-
-                  echo -n "HTTPS GET raw.githubusercontent.com → "
-                  curl -s --max-time 120 -o /dev/null -w "%{http_code} (%{time_total}s)\n" \
-                    https://raw.githubusercontent.com/vllm-project/vllm-ascend/main/README.md || echo "❌ FAILED"
-
-                  echo ""
                   echo "--- git clone (depth=1) ---"
                   cd /tmp
                   git clone --depth=1 https://github.com/vllm-project/vllm-ascend.git 2>&1 | tail -3
