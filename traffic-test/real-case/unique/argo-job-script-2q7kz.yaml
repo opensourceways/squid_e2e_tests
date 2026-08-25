@@ -1,0 +1,353 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  annotations:
+  generateName: job-script-
+  labels:
+    910B3: "2"
+    dispatch/wlcb: "true"
+    huawei.com/ascend-1980: "2"
+    huawei.com/npu: "true"
+    karmada.io/managed: "true"
+    kubernetes.io/arch: arm64
+  name: job-script-2q7kz
+  namespace: argo
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  policies:
+  - action: AbortJob
+    event: PodFailed
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  - maxRetry: 1
+    minAvailable: 1
+    name: main-script
+    replicas: 1
+    template:
+      metadata:
+        annotations:
+          kubernetes.io/ingress-bandwidth: 150M
+      spec:
+        activeDeadlineSeconds: 14400
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: node.kubernetes.io/npu.chip.name
+                  operator: In
+                  values:
+                  - 910B3
+        containers:
+        - args:
+          - "git config --global url.\"http://git-cache-http-server.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://gitcode.com\" || echo \"WARNING: git config failed for gitcode\"\ngit
+            config --global url.\"http://git-cache-github.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://gh-proxy.test.osinfra.cn/https://github.com\" || echo \"WARNING:
+            git config failed for github\"\ngit config --global url.\"http://git-cache-github.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://github.com\" || echo \"WARNING: git config failed for github\"\ngit
+            config --global url.\"http://git-cache-gitee.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://gitee.com\" || echo \"WARNING: git config failed for gitee\"\ngit
+            config --global url.\"http://git-cache-atomgit.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://atomgit.com\" || echo \"WARNING: git config failed for atomgit\"\ngit
+            config --global url.\"http://git-cache-codehub.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://codehub.devcloud.cn-north-4.huaweicloud.com\" || echo \"WARNING:
+            git config failed for codehub\"\n\ntrap 'EXIT_CODE=$?; [ \"$EXIT_CODE\"
+            -ne 0 ] && sleep 10' EXIT\n{\n    set +e\n    echo \"===== System Info
+            =====\"\n    echo \"===== OS =====\"\n    uname -a\n    human_bytes()
+            {\n        local bytes=$1\n        case \"$bytes\" in\n            max|-1)
+            echo \"unlimited\"; return ;;\n        esac\n        if [ \"${bytes#-}\"
+            != \"$bytes\" ]; then\n            echo \"unlimited\"\n            return\n
+            \       fi\n        if [ \"$bytes\" -ge 1073741824 ]; then\n            echo
+            \"$((bytes / 1073741824))GiB\"\n        elif [ \"$bytes\" -ge 1048576
+            ]; then\n            echo \"$((bytes / 1048576))MiB\"\n        elif [
+            \"$bytes\" -ge 1024 ]; then\n            echo \"$((bytes / 1024))KiB\"\n
+            \       else\n            echo \"${bytes}B\"\n        fi\n    }\n    echo
+            \"===== CPU =====\"\n    req_cores=\"\"\n    if [ -r /sys/fs/cgroup/cpu.weight
+            ]; then\n        weight=$(cat /sys/fs/cgroup/cpu.weight)\n        if [
+            -n \"$weight\" ] && [ \"$weight\" -gt 1 ] 2>/dev/null; then\n            req_cores=$((
+            ( ( (weight - 1) * 262142 / 9999 + 2 ) * 1000 / 1024 + 500 ) / 1000 ))\n
+            \       fi\n    elif [ -r /sys/fs/cgroup/cpu/cpu.shares ]; then\n        shares=$(cat
+            /sys/fs/cgroup/cpu/cpu.shares)\n        if [ -n \"$shares\" ] && [ \"$shares\"
+            -gt 2 ] 2>/dev/null; then\n            req_cores=$(( ( shares * 1000 /
+            1024 + 500 ) / 1000 ))\n        fi\n    fi\n    if [ -n \"$req_cores\"
+            ]; then\n        echo \"CPU request: ${req_cores} cores\"\n    fi\n    if
+            [ -r /sys/fs/cgroup/cpu.max ]; then\n        read -r quota period < /sys/fs/cgroup/cpu.max\n
+            \       if [ \"$quota\" != \"max\" ] && [ -n \"$period\" ] && [ \"$period\"
+            != \"0\" ]; then\n            echo \"CPU limit: $((quota / period)) cores\"\n
+            \       fi\n    elif [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ] && [ -r
+            /sys/fs/cgroup/cpu/cpu.cfs_period_us ]; then\n        quota=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us)\n
+            \       period=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)\n        if
+            [ \"$quota\" != \"-1\" ] && [ -n \"$period\" ] && [ \"$period\" != \"0\"
+            ]; then\n            echo \"CPU limit: $((quota / period)) cores\"\n        fi\n
+            \   fi\n    if [ -r /sys/fs/cgroup/cpu.stat ]; then\n        t1=$(grep
+            '^usage_usec ' /sys/fs/cgroup/cpu.stat | cut -d ' ' -f2)\n        sleep
+            1\n        t2=$(grep '^usage_usec ' /sys/fs/cgroup/cpu.stat | cut -d '
+            ' -f2)\n        if [ -n \"$t1\" ] && [ -n \"$t2\" ] && [ \"$t2\" -ge \"$t1\"
+            ] 2>/dev/null; then\n            echo \"CPU usage: $(awk -v d=\"$((t2
+            - t1))\" 'BEGIN { printf \"%.2f cores\", d / 1000000 }')\"\n        fi\n
+            \   elif [ -r /sys/fs/cgroup/cpuacct/cpuacct.usage ]; then\n        n1=$(cat
+            /sys/fs/cgroup/cpuacct/cpuacct.usage)\n        sleep 1\n        n2=$(cat
+            /sys/fs/cgroup/cpuacct/cpuacct.usage)\n        if [ -n \"$n1\" ] && [
+            -n \"$n2\" ] && [ \"$n2\" -ge \"$n1\" ] 2>/dev/null; then\n            echo
+            \"CPU usage: $(awk -v d=\"$((n2 - n1))\" 'BEGIN { printf \"%.2f cores\",
+            d / 1000000000 }')\"\n        fi\n    fi\n    echo \"===== Memory =====\"\n
+            \   if [ -r /sys/fs/cgroup/memory.max ]; then\n        echo \"Memory limit:
+            $(human_bytes \"$(cat /sys/fs/cgroup/memory.max)\")\"\n        if [ -r
+            /sys/fs/cgroup/memory.current ]; then\n            echo \"Memory usage:
+            $(human_bytes \"$(cat /sys/fs/cgroup/memory.current)\")\"\n        fi\n
+            \   elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then\n        echo
+            \"Memory limit: $(human_bytes \"$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)\")\"\n
+            \       if [ -r /sys/fs/cgroup/memory/memory.usage_in_bytes ]; then\n
+            \           echo \"Memory usage: $(human_bytes \"$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes)\")\"\n
+            \       fi\n    else\n        free -h\n    fi\n    echo \"===== NPU =====\"\n
+            \   if command -v npu-smi >/dev/null 2>&1; then\n        npu-smi info\n
+            \   else\n        echo \"npu-smi not available\"\n    fi\n} 2>/dev/null
+            || true\ncat > .bazelrc << 'EOF'\n# Use GitHub BCR source as the registry\ncommon
+            --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/\nEOF\nset
+            -e\n\nREPO_NAME=$(basename https://gitcode.com/Ascend/msprof.git .git)\necho
+            ${REPO_NAME}  # 输出: msopprof\n\nrm -rf CODE && git clone -b master https://gitcode.com/Ascend/msprof.git
+            CODE\n# rm -rf CODE && git clone -b master https://gitcode.com/Ascend/msprof.git
+            CODE\nCODE_PARENT_DIR=${PWD}\n\ncd CODE\npwd\n\n# 仓库名称\ngit config --global
+            user.email \"AtlasAccount@noreply.gitcode.com\"\ngit config --global user.name
+            \"AtlasAccount\"\n# 代码检出\ngit fetch origin\ngit fetch origin refs/merge-requests/457/head:new_457\ngit
+            checkout new_457\ngit merge origin/master\nBASE_COMMIT=$(git merge-base
+            origin/master new_457)\ngit diff --name-only $BASE_COMMIT HEAD > /tmp/modify_files.txt\n\n#
+            修正：变量赋值不能有空格\nif [ master = \"master\" ]; then\n    version=\"1.0.0\"\nelse
+            \n    version=\"26.0.0\"\nfi\n\n#obsutil配置ak，sk\nrm -f /tmp/mindstudio-profiler_*.run\n#
+            obsutil cp obs://mindstudio-pr/${REPO_NAME}/pr/457/mindstudio-profiler_26.0.0_aarch64.run
+            /tmp/\ncd /tmp\nwget https://mindstudio-pr.obs.cn-north-4.myhuaweicloud.com/msprof/pr/457/arm/mindstudio-profiler_${version}_aarch64.run\n#
+            obsutil cp obs://ascend-package/${REPO_NAME}/pr/457/mindstudio-profiler_26.0.0_aarch64.run
+            /tmp/\n# 验证是否取到了包\n# 添加执行权限（如果需要）\nchmod +x /tmp/mindstudio-profiler_${version}_aarch64.run\n\n#
+            执行安装（使用绝对路径）\n/tmp/mindstudio-profiler_${version}_aarch64.run --install
+            --install-path=/usr/local/Ascend/cann\nsource /usr/local/Ascend/cann/set_env.sh\n\ncd
+            ${CODE_PARENT_DIR}/CODE/test/st\nbash run_all.sh \n"
+          command:
+          - bash
+          - -c
+          env:
+          - name: WORKSPACE
+            value: /workspace
+          - name: workspace
+            value: /workspace
+          - name: GOPROXY
+            value: http://cache-service.nginx-pypi-cache.svc.cluster.local:8084|https://goproxy.cn|direct
+          - name: GOSUMDB
+            value: sum.golang.google.cn
+          - name: jobName
+            value: j_BtI0tjKo
+          - name: GIT_LOCAL_BRANCH
+            value: linux
+          - name: JOB_NAME
+            value: j_BtI0tjKo
+          - name: LANGUAGE
+            value: en_US.utf8
+          - name: REMOTE_URL
+            value: https://gitcode.com/Ascend/msprof.git
+          - name: BUILD_DISPLAY_NAME
+            value: '#1'
+          - name: __repository__
+            value: '{"repo_name":"msprof","url":"https://gitcode.com/Ascend/msprof.git"}'
+          - name: CLOUD_BUILD_ENV_INFO
+            value: devcloud:prod
+          - name: Preference
+            value: '[]'
+          - name: CLOUD_BUILD_LANGUAGE
+            value: zh-cn
+          - name: jobType
+            value: codeci
+          - name: JOB_ID
+            value: b93a15a8fb7848918e4f4d7e109eaa1d
+          - name: TIMESTAMP
+            value: "20260825103744"
+          - name: TARGET_BRANCH
+            value: master
+          - name: CLOUD_BUILD_BUILD_TYPE
+            value: JOB
+          - name: CLOUD_BUILD_TRIGGER_USER
+            value: hwstaff_mindstudio/pipeline_admin_trust
+          - name: GIT_COMMIT
+            value: 959fc851218a6ea24ffdfb7a43b8f7e932fb2c3c
+          - name: COMMIT_ID_SHORTER
+            value: 959fc851
+          - name: slaveType
+            value: k8sdockerondocker
+          - name: jobId
+            value: BtI0tjKo
+          - name: ___JOB_NAME___
+            value: ST_msprof_pr_gitcode_test
+          - name: CLOUD_BUILD_TRIGGER_TYPE
+            value: MANUAL
+          - name: HOSTNAME
+            value: 35bbbe5358f1
+          - name: CLOUD_BUILD_ENV
+            value: prod
+          - name: CLOUD_BUILD_TRIGGER_USER_ID
+            value: f12f2e5386be4914bf5d012b1610bf64
+          - name: CLOUD_BUILD_CONTEXT_PATH
+            value: /build-project-api
+          - name: codeBranch
+            value: master
+          - name: COMMIT_ID
+            value: 959fc851218a6ea24ffdfb7a43b8f7e932fb2c3c
+          - name: BUILD_NUMBER
+            value: "1"
+          - name: EXECUTOR_NUMBER
+            value: "0"
+          - name: image
+            value: swr.cn-north-4.myhuaweicloud.com/octopus_jnlp/dockerjnlp:4.2.1
+          - name: CLOUD_BUILD_PROJECT_ID
+            value: ad76139b-ac15-4191-abf7-c2f513b17f30
+          - name: CODEARTS_BUILD_META
+            value: ${WORKSPACE}/.ci_build_meta
+          - name: GIT_BRANCH
+            value: origin/master
+          - name: CLOUD_BUILD_TIMESTAMP
+            value: "1787625464829"
+          - name: JOB_BASE_NAME
+            value: j_BtI0tjKo
+          - name: CLOUD_BUILD_PROJECT_NAME
+            value: ST_msprof_pr_gitcode_test
+          - name: CODEARTS_OUTPUT
+            value: ${WORKSPACE}/.ci_user_output
+          - name: JENKINS_SERVER_COOKIE
+            value: durable-d190dc04fd80d65cac56219b69bdb3af
+          - name: BASH_ENV
+            value: /usr/local/bin/signal_forward.sh
+          - name: EXECUTOR
+            value: hwstaff_mindstudio/pipeline_admin_trust
+          - name: SOURCE_NAME
+            value: msprof
+          - name: LC_ALL
+            value: en_US.utf8
+          - name: CLOUD_BUILD_PROJECT_API_URL
+            value: https://cloudbuild-backend.cn-north-4.myhuaweicloud.com:8443/build-project-api
+          - name: CLOUD_BUILD_ANALYSIS_URL
+            value: https://172.22.1.78:7533/buildcheckanalysis
+          - name: BUILDNUMBER
+            value: "20260825.3"
+          - name: WORKSPACE_TMP
+            value: /devcloud/slavespace/slave1-new/workspace/j_BtI0tjKo@tmp
+          - name: CLOUD_BUILD_DOMAIN_TAG
+            value: hwstaff_mindstudio
+          - name: PROJECT_ID
+            value: 6b5df9811c84434296883cb706db6211
+          - name: CLOUD_BUILD_ENV_REGION
+            value: kunpeng
+          - name: CLOUD_BUILD_JOB_DISPLAY_NAME
+            value: ST_msprof_pr_gitcode_test
+          - name: CLOUD_BUILD_BUILD_YAML_PATH
+            value: .cloudbuild/build.yml
+          - name: MAX_JOBS
+            value: "16"
+          - name: CLOUD_BUILD_DOMAIN_NAME
+            value: hwstaff_mindstudio
+          - name: pr_id
+            value: "457"
+          - name: CI
+            value: "false"
+          - name: CLOUD_BUILD_RECORD_ID
+            value: 27f360a6-e3c1-4557-a6f0-6ab205667fc6
+          - name: namespace
+            value: argo
+          - name: CLOUD_BUILD_SERVER_URL
+            value: https://cloudbuild-backend.cn-north-4.myhuaweicloud.com:8443/
+          - name: repoUrl
+            value: https://gitcode.com/Seanesmhxocism/msprof.git
+          - name: INCREASENUM
+            value: "242"
+          - name: CLOUD_BUILD_REPO_URL
+            value: https://gitcode.com/Seanesmhxocism/msprof.git
+          - name: BUILD_ID
+            value: "1"
+          - name: STAGE_NAME
+            value: stage5
+          - name: CLOUD_BUILD_DOMAIN_ID
+            value: 267e9fa6072f4e439fd77b50df5421e2
+          - name: pipelineRunId
+            value: 0699272ede214a3e979a57c8b4102dac
+          - name: CMAKE_BUILD_PARALLEL_LEVEL
+            value: "16"
+          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/mindstudio-image/mindstudio-st-msprof:26.1.0-0708-test3
+          name: ascend
+          resources:
+            limits:
+              huawei.com/ascend-1980: "2"
+              memory: 40Gi
+            requests:
+              cpu: "16"
+              huawei.com/ascend-1980: "2"
+              memory: 40Gi
+          volumeMounts:
+          - mountPath: /usr/local/Ascend/driver
+            name: ascend-driver
+            readOnly: true
+          workingDir: /workspace
+        - args:
+          - -c
+          - |-
+            trap 'echo "Received TERM, exiting."; exit 0' TERM
+            HEARTBEAT_FILE="$HEARTBEAT_FILE_PATH"
+            TIMEOUT_SEC=$HEARTBEAT_TIMEOUT_SEC
+            touch "$HEARTBEAT_FILE"
+            MY_CGROUP=$(awk -F/ '{print $NF}' /proc/self/cgroup | head -1)
+            COUNT=0
+            while true; do
+              LAST=$(stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null || stat -f %m "$HEARTBEAT_FILE")
+              NOW=$(date +%s)
+              ELAPSED=$((NOW - LAST))
+              if [ "$ELAPSED" -ge "$TIMEOUT_SEC" ]; then
+                echo "Heartbeat timeout (${TIMEOUT_SEC}s). Killing all pod processes."
+                for attempt in 1 2 3 4 5; do
+                  for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+                    if [ "$pid" = "1" ]; then
+                      continue
+                    fi
+                    CG=$(awk -F/ '{print $NF}' /proc/$pid/cgroup 2>/dev/null | head -1)
+                    if [ "$CG" != "$MY_CGROUP" ]; then
+                      kill -9 "$pid" 2>/dev/null || true
+                    fi
+                  done
+                  sleep 2
+                done
+                echo "Killing PID 1."
+                kill -9 1 2>/dev/null || true
+                exit 1
+              fi
+              COUNT=$((COUNT + 1))
+              if [ $((COUNT % 5)) -eq 0 ]; then
+                REMAINING=$((TIMEOUT_SEC - ELAPSED))
+                echo "Heartbeat remaining: ${REMAINING}s"
+              fi
+              sleep 1
+            done
+          command:
+          - sh
+          env:
+          - name: HEARTBEAT_FILE_PATH
+            value: /tmp/heartbeat
+          - name: HEARTBEAT_TIMEOUT_SEC
+            value: "600"
+          image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine:3.23.3
+          name: heartbeat
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 200Mi
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        shareProcessNamespace: true
+        volumes:
+        - hostPath:
+            path: /usr/local/Ascend/driver
+          name: ascend-driver

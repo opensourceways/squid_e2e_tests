@@ -73,7 +73,7 @@ rate(squid_client_http_kbytes_out_kbytes_total{job="squid"}[5m])
 
 # 回源带宽 KB/s（缓存节省量）
 rate(squid_server_http_kbytes_in_kbytes_total{job="squid"}[5m])
-
+/ rate(squid_client_http_kbytes_out_kbytes_total{job="squid"}[5m])
 # 双副本请求分布
 sum by (instance) (squid_client_http_requests_total{job="squid"})
 ```

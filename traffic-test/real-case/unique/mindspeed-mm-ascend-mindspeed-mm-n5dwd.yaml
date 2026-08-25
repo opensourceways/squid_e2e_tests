@@ -1,0 +1,433 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  annotations:
+  generateName: ascend-mindspeed-mm-
+  labels:
+    910B3: "8"
+    dispatch/wlcb: "true"
+    huawei.com/ascend-1980: "8"
+    huawei.com/npu: "true"
+    jobPRID: "3030"
+    jobRepositoryName: ascend-mindspeed-mm
+    karmada.io/managed: "true"
+    kubernetes.io/arch: arm64
+    pipeline/run-id: dd3777cf2b55432c89836c1be122a2e6
+    pvc/001: "true"
+    pvc/wlcb: "true"
+  name: ascend-mindspeed-mm-n5dwd
+  namespace: mindspeed-mm
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  policies:
+  - action: AbortJob
+    event: PodFailed
+  queue: eight-card-priority-queue
+  schedulerName: volcano
+  tasks:
+  - maxRetry: 1
+    minAvailable: 1
+    name: main-script
+    replicas: 1
+    template:
+      metadata:
+        annotations:
+          kubernetes.io/ingress-bandwidth: 150M
+      spec:
+        activeDeadlineSeconds: 14400
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: node.kubernetes.io/npu.chip.name
+                  operator: In
+                  values:
+                  - 910B3
+        containers:
+        - args:
+          - |
+            git config --global url."http://git-cache-http-server.git-cache.svc.cluster.local:8080".insteadOf "https://gitcode.com" || echo "WARNING: git config failed for gitcode"
+            git config --global url."http://git-cache-github.git-cache.svc.cluster.local:8080".insteadOf "https://gh-proxy.test.osinfra.cn/https://github.com" || echo "WARNING: git config failed for github"
+            git config --global url."http://git-cache-github.git-cache.svc.cluster.local:8080".insteadOf "https://github.com" || echo "WARNING: git config failed for github"
+            git config --global url."http://git-cache-gitee.git-cache.svc.cluster.local:8080".insteadOf "https://gitee.com" || echo "WARNING: git config failed for gitee"
+            git config --global url."http://git-cache-atomgit.git-cache.svc.cluster.local:8080".insteadOf "https://atomgit.com" || echo "WARNING: git config failed for atomgit"
+            git config --global url."http://git-cache-codehub.git-cache.svc.cluster.local:8080".insteadOf "https://codehub.devcloud.cn-north-4.huaweicloud.com" || echo "WARNING: git config failed for codehub"
+
+            trap 'EXIT_CODE=$?; [ "$EXIT_CODE" -ne 0 ] && sleep 10' EXIT
+            {
+                set +e
+                echo "===== System Info ====="
+                echo "===== OS ====="
+                uname -a
+                human_bytes() {
+                    local bytes=$1
+                    case "$bytes" in
+                        max|-1) echo "unlimited"; return ;;
+                    esac
+                    if [ "${bytes#-}" != "$bytes" ]; then
+                        echo "unlimited"
+                        return
+                    fi
+                    if [ "$bytes" -ge 1073741824 ]; then
+                        echo "$((bytes / 1073741824))GiB"
+                    elif [ "$bytes" -ge 1048576 ]; then
+                        echo "$((bytes / 1048576))MiB"
+                    elif [ "$bytes" -ge 1024 ]; then
+                        echo "$((bytes / 1024))KiB"
+                    else
+                        echo "${bytes}B"
+                    fi
+                }
+                echo "===== CPU ====="
+                req_cores=""
+                if [ -r /sys/fs/cgroup/cpu.weight ]; then
+                    weight=$(cat /sys/fs/cgroup/cpu.weight)
+                    if [ -n "$weight" ] && [ "$weight" -gt 1 ] 2>/dev/null; then
+                        req_cores=$(( ( ( (weight - 1) * 262142 / 9999 + 2 ) * 1000 / 1024 + 500 ) / 1000 ))
+                    fi
+                elif [ -r /sys/fs/cgroup/cpu/cpu.shares ]; then
+                    shares=$(cat /sys/fs/cgroup/cpu/cpu.shares)
+                    if [ -n "$shares" ] && [ "$shares" -gt 2 ] 2>/dev/null; then
+                        req_cores=$(( ( shares * 1000 / 1024 + 500 ) / 1000 ))
+                    fi
+                fi
+                if [ -n "$req_cores" ]; then
+                    echo "CPU request: ${req_cores} cores"
+                fi
+                if [ -r /sys/fs/cgroup/cpu.max ]; then
+                    read -r quota period < /sys/fs/cgroup/cpu.max
+                    if [ "$quota" != "max" ] && [ -n "$period" ] && [ "$period" != "0" ]; then
+                        echo "CPU limit: $((quota / period)) cores"
+                    fi
+                elif [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ] && [ -r /sys/fs/cgroup/cpu/cpu.cfs_period_us ]; then
+                    quota=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us)
+                    period=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)
+                    if [ "$quota" != "-1" ] && [ -n "$period" ] && [ "$period" != "0" ]; then
+                        echo "CPU limit: $((quota / period)) cores"
+                    fi
+                fi
+                if [ -r /sys/fs/cgroup/cpu.stat ]; then
+                    t1=$(grep '^usage_usec ' /sys/fs/cgroup/cpu.stat | cut -d ' ' -f2)
+                    sleep 1
+                    t2=$(grep '^usage_usec ' /sys/fs/cgroup/cpu.stat | cut -d ' ' -f2)
+                    if [ -n "$t1" ] && [ -n "$t2" ] && [ "$t2" -ge "$t1" ] 2>/dev/null; then
+                        echo "CPU usage: $(awk -v d="$((t2 - t1))" 'BEGIN { printf "%.2f cores", d / 1000000 }')"
+                    fi
+                elif [ -r /sys/fs/cgroup/cpuacct/cpuacct.usage ]; then
+                    n1=$(cat /sys/fs/cgroup/cpuacct/cpuacct.usage)
+                    sleep 1
+                    n2=$(cat /sys/fs/cgroup/cpuacct/cpuacct.usage)
+                    if [ -n "$n1" ] && [ -n "$n2" ] && [ "$n2" -ge "$n1" ] 2>/dev/null; then
+                        echo "CPU usage: $(awk -v d="$((n2 - n1))" 'BEGIN { printf "%.2f cores", d / 1000000000 }')"
+                    fi
+                fi
+                echo "===== Memory ====="
+                if [ -r /sys/fs/cgroup/memory.max ]; then
+                    echo "Memory limit: $(human_bytes "$(cat /sys/fs/cgroup/memory.max)")"
+                    if [ -r /sys/fs/cgroup/memory.current ]; then
+                        echo "Memory usage: $(human_bytes "$(cat /sys/fs/cgroup/memory.current)")"
+                    fi
+                elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
+                    echo "Memory limit: $(human_bytes "$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)")"
+                    if [ -r /sys/fs/cgroup/memory/memory.usage_in_bytes ]; then
+                        echo "Memory usage: $(human_bytes "$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes)")"
+                    fi
+                else
+                    free -h
+                fi
+                echo "===== NPU ====="
+                if command -v npu-smi >/dev/null 2>&1; then
+                    npu-smi info
+                else
+                    echo "npu-smi not available"
+                fi
+            } 2>/dev/null || true
+            if [ -n "https://gitcode.com/Ascend/MindSpeed-MM.git" ]; then
+                CLONE_OK=true
+                git clone --single-branch -b "master" "https://gitcode.com/Ascend/MindSpeed-MM.git" "$WORKSPACE" || {
+                    mkdir "$WORKSPACE" || echo "WARNING: directory exists"
+                    echo "WARNING: 主项目拉取失败！"
+                    CLONE_OK=false
+                }
+                cd "$WORKSPACE"
+                if [ "$CLONE_OK" = "true" ]; then
+                    git fetch origin +refs/merge-requests/3030/head:pr
+                    git config --global user.name "robot"
+                    git config --global user.email "your@emaple.com"
+                    git merge pr --no-ff -m "Merge master from refs/merge-requests/3030/head" || {
+                        echo "WARNING: 主项目merge失败！"
+                    }
+                fi
+            fi
+            cat > .bazelrc << 'EOF'
+            # Use GitHub BCR source as the registry
+            common --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/
+            EOF
+            #!/bin/bash
+            set +x  # 强制关闭命令回显（核心修复）
+
+            # 所有输出只会打印内容，不会显示命令本身
+            echo "start mindspeed-mm st"
+
+            echo "------------------------------------1. git clone code-----------------------------------"
+            rm -rf CODE
+            git clone https://gitcode.com/Ascend/MindSpeed-MM.git -b master CODE
+            cd CODE
+
+            git config user.email AtlasAccount@noreply.gitcode.com
+            git config user.name AtlasAccount
+
+            git fetch origin refs/merge-requests/3030/head:new_3030
+            git checkout new_3030
+            git merge origin/master
+
+            echo "------------------------------------2. run st script-----------------------------------"
+            bash ci/mm_ci_trigger.sh /workspace 3030 master ut
+          command:
+          - bash
+          - -c
+          env:
+          - name: WORKSPACE
+            value: /workspace
+          - name: workspace
+            value: /workspace
+          - name: GOPROXY
+            value: http://cache-service.nginx-pypi-cache.svc.cluster.local:8084|https://goproxy.cn|direct
+          - name: GOSUMDB
+            value: sum.golang.google.cn
+          - name: type
+            value: ut
+          - name: CLOUD_BUILD_BUILD_YAML_PATH
+            value: .cloudbuild/build.yml
+          - name: CI
+            value: "false"
+          - name: codeBranch
+            value: master
+          - name: STAGE_NAME
+            value: stage5
+          - name: GIT_COMMIT
+            value: caec4ed364a910456bc296760ff4ef6b4e1ce3ba
+          - name: CLOUD_BUILD_PROJECT_ID
+            value: 8cdb4f2b-6a3a-4b6d-af63-483754c301b6
+          - name: BUILDNUMBER
+            value: "20260825.5"
+          - name: CLOUD_BUILD_DOMAIN_ID
+            value: 0d336831568090260fd5c01450729240
+          - name: BUILD_ID
+            value: "1"
+          - name: CLOUD_BUILD_DOMAIN_TAG
+            value: hwstaff_jsz_gjl
+          - name: JOB_NAME
+            value: j_05DlCIqp
+          - name: BUILD_DISPLAY_NAME
+            value: '#1'
+          - name: CLOUD_BUILD_TRIGGER_USER_ID
+            value: 538b80346627462c9a39b8d3c65612a6
+          - name: CLOUD_BUILD_TRIGGER_USER
+            value: hwstaff_jsz_gjl/pipeline_admin_trust
+          - name: CLOUD_BUILD_BUILD_TYPE
+            value: JOB
+          - name: TARGET_BRANCH
+            value: master
+          - name: CLOUD_BUILD_ENV_REGION
+            value: kunpeng
+          - name: CLOUD_BUILD_REPO_URL
+            value: https://gitcode.com/MoCuishle-M/MindSpeed-MM-CI.git
+          - name: pipelineRunId
+            value: dd3777cf2b55432c89836c1be122a2e6
+          - name: LANGUAGE
+            value: en_US.utf8
+          - name: GIT_LOCAL_BRANCH
+            value: master
+          - name: CLOUD_BUILD_RECORD_ID
+            value: 6f87de57-0f81-4a6b-8d60-d515e0e0c6af
+          - name: org_name
+            value: Ascend
+          - name: repo
+            value: MindSpeed-MM
+          - name: MAX_JOBS
+            value: "184"
+          - name: EXECUTOR
+            value: hwstaff_jsz_gjl/pipeline_admin_trust
+          - name: repo_url
+            value: https://gitcode.com/Ascend/MindSpeed-MM.git
+          - name: CLOUD_BUILD_SERVER_URL
+            value: https://cloudbuild-backend.cn-north-4.myhuaweicloud.com:8443/
+          - name: CLOUD_BUILD_ENV_INFO
+            value: devcloud:prod
+          - name: image
+            value: swr.cn-north-4.myhuaweicloud.com/octopus_jnlp/dockerjnlp:4.2.1
+          - name: CLOUD_BUILD_PROJECT_API_URL
+            value: https://cloudbuild-backend.cn-north-4.myhuaweicloud.com:8443/build-project-api
+          - name: CLOUD_BUILD_DOMAIN_NAME
+            value: hwstaff_jsz_gjl
+          - name: namespace
+            value: argo
+          - name: Preference
+            value: '[]'
+          - name: CLOUD_BUILD_TIMESTAMP
+            value: "1787625982567"
+          - name: jobName
+            value: j_05DlCIqp
+          - name: CMAKE_BUILD_PARALLEL_LEVEL
+            value: "184"
+          - name: CLOUD_BUILD_ANALYSIS_URL
+            value: https://172.22.1.78:7533/buildcheckanalysis
+          - name: jobType
+            value: codeci
+          - name: INCREASENUM
+            value: "385"
+          - name: EXECUTOR_NUMBER
+            value: "0"
+          - name: COMMIT_ID_SHORTER
+            value: caec4ed3
+          - name: ___workspace___
+            value: /workspace
+          - name: CLOUD_BUILD_PROJECT_NAME
+            value: mindspeed-mm-st-pool
+          - name: BASH_ENV
+            value: /usr/local/bin/signal_forward.sh
+          - name: JOB_ID
+            value: fcaabe341c8e49989b17028e925854b3
+          - name: repoUrl
+            value: https://gitcode.com/MoCuishle-M/MindSpeed-MM-CI.git
+          - name: TIMESTAMP
+            value: "20260825104622"
+          - name: __repository__
+            value: '{"repo_name":"MindSpeed-MM","url":"https://gitcode.com/Ascend/MindSpeed-MM.git"}'
+          - name: PROJECT_ID
+            value: a9b188a62f334fc0963bcfb523426d17
+          - name: BUILD_NUMBER
+            value: "1"
+          - name: SOURCE_NAME
+            value: MindSpeed-MM-CI
+          - name: HOSTNAME
+            value: 4ec924303109
+          - name: JENKINS_SERVER_COOKIE
+            value: durable-b166008526864c9a22f4fac1464078f5
+          - name: CODEARTS_OUTPUT
+            value: ${WORKSPACE}/.ci_user_output
+          - name: CLOUD_BUILD_ENV
+            value: prod
+          - name: pr_id
+            value: "3030"
+          - name: jobId
+            value: 05DlCIqp
+          - name: CLOUD_BUILD_JOB_DISPLAY_NAME
+            value: mindspeed-mm-st-pool
+          - name: CLOUD_BUILD_CONTEXT_PATH
+            value: /build-project-api
+          - name: WORKSPACE_TMP
+            value: /devcloud/slavespace/slave1-new/workspace/j_05DlCIqp@tmp
+          - name: CODEARTS_BUILD_META
+            value: ${WORKSPACE}/.ci_build_meta
+          - name: CLOUD_BUILD_TRIGGER_TYPE
+            value: MANUAL
+          - name: GIT_BRANCH
+            value: origin/master
+          - name: COMMIT_ID
+            value: caec4ed364a910456bc296760ff4ef6b4e1ce3ba
+          - name: CLOUD_BUILD_LANGUAGE
+            value: zh-cn
+          - name: JOB_BASE_NAME
+            value: j_05DlCIqp
+          - name: ___JOB_NAME___
+            value: mindspeed-mm-st-pool
+          - name: slaveType
+            value: k8sdockerondocker
+          - name: LC_ALL
+            value: en_US.utf8
+          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/mindspeed/pr-mindspeed-mm:v26.1.0-cann9.0.0-torch_npu2.7.1.post6-910b-openeuler24.03-py3.11-aarch64-ci-0824
+          name: ascend
+          resources:
+            limits:
+              huawei.com/ascend-1980: "8"
+              memory: 1232Gi
+            requests:
+              cpu: "184"
+              huawei.com/ascend-1980: "8"
+              memory: 1232Gi
+          volumeMounts:
+          - mountPath: /usr/local/Ascend/driver
+            name: ascend-driver
+            readOnly: true
+          - mountPath: /dev/shm
+            name: shm
+          - mountPath: /home/ci_resource
+            name: dataset
+          workingDir: /workspace
+        - args:
+          - -c
+          - |-
+            trap 'echo "Received TERM, exiting."; exit 0' TERM
+            HEARTBEAT_FILE="$HEARTBEAT_FILE_PATH"
+            TIMEOUT_SEC=$HEARTBEAT_TIMEOUT_SEC
+            touch "$HEARTBEAT_FILE"
+            MY_CGROUP=$(awk -F/ '{print $NF}' /proc/self/cgroup | head -1)
+            COUNT=0
+            while true; do
+              LAST=$(stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null || stat -f %m "$HEARTBEAT_FILE")
+              NOW=$(date +%s)
+              ELAPSED=$((NOW - LAST))
+              if [ "$ELAPSED" -ge "$TIMEOUT_SEC" ]; then
+                echo "Heartbeat timeout (${TIMEOUT_SEC}s). Killing all pod processes."
+                for attempt in 1 2 3 4 5; do
+                  for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+                    if [ "$pid" = "1" ]; then
+                      continue
+                    fi
+                    CG=$(awk -F/ '{print $NF}' /proc/$pid/cgroup 2>/dev/null | head -1)
+                    if [ "$CG" != "$MY_CGROUP" ]; then
+                      kill -9 "$pid" 2>/dev/null || true
+                    fi
+                  done
+                  sleep 2
+                done
+                echo "Killing PID 1."
+                kill -9 1 2>/dev/null || true
+                exit 1
+              fi
+              COUNT=$((COUNT + 1))
+              if [ $((COUNT % 5)) -eq 0 ]; then
+                REMAINING=$((TIMEOUT_SEC - ELAPSED))
+                echo "Heartbeat remaining: ${REMAINING}s"
+              fi
+              sleep 1
+            done
+          command:
+          - sh
+          env:
+          - name: HEARTBEAT_FILE_PATH
+            value: /tmp/heartbeat
+          - name: HEARTBEAT_TIMEOUT_SEC
+            value: "600"
+          image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine:3.23.3
+          name: heartbeat
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 200Mi
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        shareProcessNamespace: true
+        volumes:
+        - hostPath:
+            path: /usr/local/Ascend/driver
+          name: ascend-driver
+        - emptyDir:
+            medium: Memory
+            sizeLimit: 256Gi
+          name: shm
+        - name: dataset
+          persistentVolumeClaim:
+            claimName: pvc-ascend-mindspeed-mm

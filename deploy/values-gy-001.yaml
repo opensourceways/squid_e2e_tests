@@ -53,14 +53,30 @@ registryProxy:
 persistence:
   squidCache:
     size: 50Gi
+    storageClass: harbor-subpath-sc
   registryCache:
     size: 200Gi
-
+    storageClass: harbor-subpath-sc
+    
 secretDefinition:
   enabled: true
   vaultPath: secrets/data/ascend/ci
   caBundleKey: squid_ca_bundle_v3_prod_pem
   caPublicKey: squid_ca_v3_prod_pem
   caTruststoreKey: squid_bazel_trust_v3_prod_jks
+  # CA 同步到运行 VCJob 的命名空间（gy-001 实测：op-plugin/argo/mindspeed 跑 VCJob），
+  # 这样注入代理时 squid-ca-cert 才能挂载进 CI 容器，否则 wget/curl 类工具会因不信任
+  # squid CA 而失败（C 类问题）。
   caNamespaces:
   - squid
+  - op-plugin
+  - argo
+  - mindspeed
+  - drivingsdk                      
+  - fsdpturbo                       
+  - megatronadaptor                 
+  - mindspeed-bridge                
+  - mindspeed-mm                    
+  - mindspeed-llm
+  - memfabric-hybrid
+  - memcache 

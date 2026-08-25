@@ -1,0 +1,386 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  annotations:
+      {"apiVersion":"batch.volcano.sh/v1alpha1","kind":"Job","metadata":{"annotations":{},"labels":{"huawei.com/ascend-1980":"1","huawei.com/npu":"true","jobPRID":"45122","jobRepositoryName":"ascend-pytorch","kubernetes.io/arch":"arm64","pipeline/run-id":"squid-reinject","squid.ci/reinject":"true"},"name":"op-plugin-ascend-pytorch-55xrv-ri","namespace":"op-plugin"},"spec":{"maxRetry":1,"minAvailable":1,"policies":[{"action":"AbortJob","event":"PodFailed"}],"queue":"shared-flexible-queue","schedulerName":"volcano","tasks":[{"maxRetry":1,"minAvailable":1,"name":"main-script","replicas":1,"template":{"metadata":{"annotations":{"kubernetes.io/ingress-bandwidth":"150M"}},"spec":{"activeDeadlineSeconds":14400,"containers":[{"args":["git config --global url.\"http://git-cache-http-server.git-cache.svc.cluster.local:8080\".insteadOf \"https://gitcode.com\" || echo \"WARNING: git config failed for gitcode\"\ngit config --global url.\"http://git-cache-github.git-cache.svc.cluster.local:8080\".insteadOf \"https://gh-proxy.test.osinfra.cn/https://github.com\" || echo \"WARNING: git config failed for github\"\ngit config --global url.\"http://git-cache-github.git-cache.svc.cluster.local:8080\".insteadOf \"https://github.com\" || echo \"WARNING: git config failed for github\"\ngit config --global url.\"http://git-cache-gitee.git-cache.svc.cluster.local:8080\".insteadOf \"https://gitee.com\" || echo \"WARNING: git config failed for gitee\"\ngit config --global url.\"http://git-cache-atomgit.git-cache.svc.cluster.local:8080\".insteadOf \"https://atomgit.com\" || echo \"WARNING: git config failed for atomgit\"\ngit config --global url.\"http://git-cache-codehub.git-cache.svc.cluster.local:8080\".insteadOf \"https://codehub.devcloud.cn-north-4.huaweicloud.com\" || echo \"WARNING: git config failed for codehub\"\n\n(trap 'EXIT_CODE=$?; [ \"$EXIT_CODE\" -ne 0 ] \u0026\u0026 sleep 10' EXIT\n{\n    set +e\n    echo \"===== System Info =====\"\n    echo \"===== OS =====\"\n    uname -a\n    human_bytes() {\n        local bytes=$1\n        case \"$bytes\" in\n            max|-1) echo \"unlimited\"; return ;;\n        esac\n        if [ \"${bytes#-}\" != \"$bytes\" ]; then\n            echo \"unlimited\"\n            return\n        fi\n        if [ \"$bytes\" -ge 1073741824 ]; then\n            echo \"$((bytes / 1073741824))GiB\"\n        elif [ \"$bytes\" -ge 1048576 ]; then\n            echo \"$((bytes / 1048576))MiB\"\n        elif [ \"$bytes\" -ge 1024 ]; then\n            echo \"$((bytes / 1024))KiB\"\n        else\n            echo \"${bytes}B\"\n        fi\n    }\n    echo \"===== CPU =====\"\n    req_cores=\"\"\n    if [ -r /sys/fs/cgroup/cpu.weight ]; then\n        weight=$(cat /sys/fs/cgroup/cpu.weight)\n        if [ -n \"$weight\" ] \u0026\u0026 [ \"$weight\" -gt 1 ] 2\u003e/dev/null; then\n            req_cores=$(( ( ( (weight - 1) * 262142 / 9999 + 2 ) * 1000 / 1024 + 500 ) / 1000 ))\n        fi\n    elif [ -r /sys/fs/cgroup/cpu/cpu.shares ]; then\n        shares=$(cat /sys/fs/cgroup/cpu/cpu.shares)\n        if [ -n \"$shares\" ] \u0026\u0026 [ \"$shares\" -gt 2 ] 2\u003e/dev/null; then\n            req_cores=$(( ( shares * 1000 / 1024 + 500 ) / 1000 ))\n        fi\n    fi\n    if [ -n \"$req_cores\" ]; then\n        echo \"CPU request: ${req_cores} cores\"\n    fi\n    if [ -r /sys/fs/cgroup/cpu.max ]; then\n        read -r quota period \u003c /sys/fs/cgroup/cpu.max\n        if [ \"$quota\" != \"max\" ] \u0026\u0026 [ -n \"$period\" ] \u0026\u0026 [ \"$period\" != \"0\" ]; then\n            echo \"CPU limit: $((quota / period)) cores\"\n        fi\n    elif [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ] \u0026\u0026 [ -r /sys/fs/cgroup/cpu/cpu.cfs_period_us ]; then\n        quota=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us)\n        period=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)\n        if [ \"$quota\" != \"-1\" ] \u0026\u0026 [ -n \"$period\" ] \u0026\u0026 [ \"$period\" != \"0\" ]; then\n            echo \"CPU limit: $((quota / period)) cores\"\n        fi\n    fi\n    if [ -r /sys/fs/cgroup/cpu.stat ]; then\n        t1=$(grep '^usage_usec ' /sys/fs/cgroup/cpu.stat | cut -d ' ' -f2)\n        sleep 1\n        t2=$(grep '^usage_usec ' /sys/fs/cgroup/cpu.stat | cut -d ' ' -f2)\n        if [ -n \"$t1\" ] \u0026\u0026 [ -n \"$t2\" ] \u0026\u0026 [ \"$t2\" -ge \"$t1\" ] 2\u003e/dev/null; then\n            echo \"CPU usage: $(awk -v d=\"$((t2 - t1))\" 'BEGIN { printf \"%.2f cores\", d / 1000000 }')\"\n        fi\n    elif [ -r /sys/fs/cgroup/cpuacct/cpuacct.usage ]; then\n        n1=$(cat /sys/fs/cgroup/cpuacct/cpuacct.usage)\n        sleep 1\n        n2=$(cat /sys/fs/cgroup/cpuacct/cpuacct.usage)\n        if [ -n \"$n1\" ] \u0026\u0026 [ -n \"$n2\" ] \u0026\u0026 [ \"$n2\" -ge \"$n1\" ] 2\u003e/dev/null; then\n            echo \"CPU usage: $(awk -v d=\"$((n2 - n1))\" 'BEGIN { printf \"%.2f cores\", d / 1000000000 }')\"\n        fi\n    fi\n    echo \"===== Memory =====\"\n    if [ -r /sys/fs/cgroup/memory.max ]; then\n        echo \"Memory limit: $(human_bytes \"$(cat /sys/fs/cgroup/memory.max)\")\"\n        if [ -r /sys/fs/cgroup/memory.current ]; then\n            echo \"Memory usage: $(human_bytes \"$(cat /sys/fs/cgroup/memory.current)\")\"\n        fi\n    elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then\n        echo \"Memory limit: $(human_bytes \"$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)\")\"\n        if [ -r /sys/fs/cgroup/memory/memory.usage_in_bytes ]; then\n            echo \"Memory usage: $(human_bytes \"$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes)\")\"\n        fi\n    else\n        free -h\n    fi\n    echo \"===== NPU =====\"\n    if command -v npu-smi \u003e/dev/null 2\u003e\u00261; then\n        npu-smi info\n    else\n        echo \"npu-smi not available\"\n    fi\n} 2\u003e/dev/null || true\nif [ -n \"https://gitcode.com/Ascend/pytorch.git\" ]; then\n    CLONE_OK=true\n    git clone --single-branch -b \"v2.9.0-26.0.0\" \"https://gitcode.com/Ascend/pytorch.git\" \"$WORKSPACE\" || {\n        mkdir \"$WORKSPACE\" || echo \"WARNING: directory exists\"\n        echo \"WARNING: 主项目拉取失败！\"\n        CLONE_OK=false\n    }\n    cd \"$WORKSPACE\"\n    if [ \"$CLONE_OK\" = \"true\" ]; then\n        git fetch origin +refs/merge-requests/45122/head:pr\n        git config --global user.name \"robot\"\n        git config --global user.email \"your@emaple.com\"\n        git merge pr --no-ff -m \"Merge v2.9.0-26.0.0 from refs/merge-requests/45122/head\" || {\n            echo \"WARNING: 主项目merge失败！\"\n        }\n    fi\nfi\ncat \u003e .bazelrc \u003c\u003c 'EOF'\n# Use GitHub BCR source as the registry\ncommon --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/\nEOF\nset -ex\n# 工作目录清空\nrm -rf *\n# 下载CI仓代码\ngit clone -b master https://codehub.devcloud.cn-north-4.huaweicloud.com/a9b188a62f334fc0963bcfb523426d17/ci_gitcode.git cie\n# 代码预合并\nbash cie/common/common/merge.sh v2.9.0-26.0.0 https://gitcode.com/Ascend/pytorch.git 45122 /workspace \ncd /workspace/CODE\nbash /workspace/cie/common/common/retry_command.sh \"git submodule update --init --recursive --force third_party/op-plugin  third_party/torchair/torchair\"\ngit diff-tree -r --name-only --no-commit-id origin/v2.9.0-26.0.0 HEAD \u003e ../modify_files.txt\ncat ../modify_files.txt \ncd /workspace\nbash cie/common/UT/pytorch_ut_general.sh v2.9.0-26.0.0 3.10 45122 /workspace 1 2 no\n\ncd ${WORKSPACE}\ncp -r --parents CODE/time_data.json /output/\n); _ec=$?; echo $_ec \u003e /output/.ascend-done; exit $_ec"],"command":["bash","-c"],"env":[{"name":"WORKSPACE","value":"/workspace"},{"name":"workspace","value":"/workspace"},{"name":"GOPROXY","value":"http://cache-service.nginx-pypi-cache.svc.cluster.local:8084|https://goproxy.cn|direct"},{"name":"GOSUMDB","value":"sum.golang.google.cn"},{"name":"CODEARTS_OUTPUT","value":"${WORKSPACE}/.ci_user_output"},{"name":"TEST_RANK","value":"1"},{"name":"TRIGGER_TYPE","value":"Generic"},{"name":"JOB_NAME","value":"j_XPR9V6TN"},{"name":"REPOSITORY_NAME","value":"1"},{"name":"MAX_JOBS","value":"23"},{"name":"TIMESTAMP","value":"20260821222519"},{"name":"jobType","value":"codeci"},{"name":"BASH_ENV","value":"/usr/local/bin/signal_forward.sh"},{"name":"CLOUD_BUILD_BUILD_YAML_PATH","value":".cloudbuild/build.yml"},{"name":"STAGE_NAME","value":"stage5"},{"name":"BUILD_NUMBER","value":"1"},{"name":"COMMIT_ID","value":"db1cf00061cb39f18efe828015d1cbba1ddee5e8"},{"name":"CLOUD_BUILD_BUILD_TYPE","value":"JOB"},{"name":"NPU_CORE","value":"no"},{"name":"BUILD_DISPLAY_NAME","value":"#1"},{"name":"jobName","value":"j_XPR9V6TN"},{"name":"TARGET_BRANCH","value":"v2.9.0-26.0.0"},{"name":"CODEARTS_BUILD_META","value":"${WORKSPACE}/.ci_build_meta"},{"name":"JENKINS_SERVER_COOKIE","value":"durable-993b64c4b0fb04bf4b059b136185c7ea"},{"name":"___workspace___","value":"/workspace"},{"name":"EXECUTOR_NUMBER","value":"0"},{"name":"image","value":"swr.cn-north-4.myhuaweicloud.com/octopus_jnlp/dockerjnlp:4.2.1"},{"name":"CLOUD_BUILD_RECORD_ID","value":"8aab9015-6a22-4d56-bd91-fb2f0d93eb66"},{"name":"CLOUD_BUILD_ENV","value":"prod"},{"name":"WORKSPACE_TMP","value":"/devcloud/slavespace/slave1-new/workspace/j_XPR9V6TN@tmp"},{"name":"CLOUD_BUILD_LANGUAGE","value":"zh-cn"},{"name":"CLOUD_BUILD_DOMAIN_TAG","value":"hwstaff_jsz_gjl"},{"name":"BUILDNUMBER","value":"20260821.381"},{"name":"PROJECT_ID","value":"a9b188a62f334fc0963bcfb523426d17"},{"name":"CLOUD_BUILD_REPO_URL","value":"https://gitcode.com/pta-robot/pytorch_op.git"},{"name":"Preference","value":"[]"},{"name":"LC_ALL","value":"en_US.utf8"},{"name":"CLOUD_BUILD_PROJECT_API_URL","value":"https://cloudbuild-backend.cn-north-4.myhuaweicloud.com:8443/build-project-api"},{"name":"__repository__","value":"{\"repo_name\":\"pytorch\",\"url\":\"https://gitcode.com/Ascend/pytorch.git\"}"},{"name":"INCREASENUM","value":"31842"},{"name":"CLOUD_BUILD_ENV_INFO","value":"devcloud:prod"},{"name":"GIT_COMMIT","value":"db1cf00061cb39f18efe828015d1cbba1ddee5e8"},{"name":"CLOUD_BUILD_DOMAIN_NAME","value":"hwstaff_jsz_gjl"},{"name":"CLOUD_BUILD_TIMESTAMP","value":"1787322323152"},{"name":"JOB_ID","value":"36b3ad882bae44cdafff7329ccb9e33e"},{"name":"jobId","value":"XPR9V6TN"},{"name":"CLOUD_BUILD_CONTEXT_PATH","value":"/build-project-api"},{"name":"COMMIT_ID_SHORTER","value":"db1cf000"},{"name":"JOB_BASE_NAME","value":"j_XPR9V6TN"},{"name":"CMAKE_BUILD_PARALLEL_LEVEL","value":"23"},{"name":"CLOUD_BUILD_JOB_DISPLAY_NAME","value":"UT_pytorch_ARM_A2_pool_Select_2"},{"name":"CLOUD_BUILD_PROJECT_NAME","value":"UT_pytorch_ARM_A2_pool_Select_2"},{"name":"namespace","value":"argo"},{"name":"CI","value":"false"},{"name":"codeBranch","value":"v2.9.0-26.0.0"},{"name":"pr_id","value":"45122"},{"name":"BUILD_ID","value":"1"},{"name":"CLOUD_BUILD_TRIGGER_USER","value":"hwstaff_jsz_gjl/pipeline_admin_trust"},{"name":"repoUrl","value":"https://gitcode.com/pta-robot/pytorch_op.git"},{"name":"REMOTE_URL","value":"https://gitcode.com/Ascend/pytorch.git"},{"name":"CLOUD_BUILD_SERVER_URL","value":"https://cloudbuild-backend.cn-north-4.myhuaweicloud.com:8443/"},{"name":"CLOUD_BUILD_TRIGGER_USER_ID","value":"538b80346627462c9a39b8d3c65612a6"},{"name":"py_version","value":"3.10"},{"name":"___JOB_NAME___","value":"UT_pytorch_ARM_A2_pool_Select_2"},{"name":"GIT_BRANCH","value":"origin/v2.9.0-26.0.0"},{"name":"slaveType","value":"k8sdockerondocker"},{"name":"LANGUAGE","value":"en_US.utf8"},{"name":"CLOUD_BUILD_ANALYSIS_URL","value":"https://172.22.1.78:7533/buildcheckanalysis"},{"name":"HOSTNAME","value":"e786d351a240"},{"name":"CLOUD_BUILD_TRIGGER_TYPE","value":"MANUAL"},{"name":"CLOUD_BUILD_ENV_REGION","value":"kunpeng"},{"name":"TEST_WORLD_SIZE","value":"2"},{"name":"GIT_LOCAL_BRANCH","value":"v2.9.0-26.0.0"},{"name":"EXECUTOR","value":"hwstaff_jsz_gjl/pipeline_admin_trust"},{"name":"CLOUD_BUILD_DOMAIN_ID","value":"0d336831568090260fd5c01450729240"},{"name":"pipeline_id","value":"1"},{"name":"CLOUD_BUILD_PROJECT_ID","value":"fdbb4248-97bc-427a-a77f-4f720e89627a"},{"name":"pipelineRunId","value":"1c9d7ea4577d4094b436dcbd4ef7c68c"},{"name":"SOURCE_NAME","value":"pytorch_op"},{"name":"HTTP_PROXY","value":"http://squid-cache.squid.svc.cluster.local:3128"},{"name":"HTTPS_PROXY","value":"http://squid-cache.squid.svc.cluster.local:3128"},{"name":"http_proxy","value":"http://squid-cache.squid.svc.cluster.local:3128"},{"name":"https_proxy","value":"http://squid-cache.squid.svc.cluster.local:3128"},{"name":"NO_PROXY","value":"localhost,127.0.0.1,172.22.1.78,triton-ascend.osinfra.cn,hf-mirror.com,git-cache-http-server.git-cache,git-cache-http-server.git-cache.svc.cluster.local,git-cache-github.git-cache,git-cache-github.git-cache.svc.cluster.local,git-cache-gitee.git-cache,git-cache-gitee.git-cache.svc.cluster.local,git-cache-atomgit.git-cache,git-cache-atomgit.git-cache.svc.cluster.local,git-cache-codehub.git-cache,git-cache-codehub.git-cache.svc.cluster.local,.svc.cluster.local,.cluster.local"},{"name":"no_proxy","value":"localhost,127.0.0.1,172.22.1.78,triton-ascend.osinfra.cn,hf-mirror.com,git-cache-http-server.git-cache,git-cache-http-server.git-cache.svc.cluster.local,git-cache-github.git-cache,git-cache-github.git-cache.svc.cluster.local,git-cache-gitee.git-cache,git-cache-gitee.git-cache.svc.cluster.local,git-cache-atomgit.git-cache,git-cache-atomgit.git-cache.svc.cluster.local,git-cache-codehub.git-cache,git-cache-codehub.git-cache.svc.cluster.local,.svc.cluster.local,.cluster.local"},{"name":"SSL_CERT_FILE","value":"/etc/squid-ca/squid-ca.pem"},{"name":"CURL_CA_BUNDLE","value":"/etc/squid-ca/squid-ca.pem"},{"name":"REQUESTS_CA_BUNDLE","value":"/etc/squid-ca/squid-ca.pem"},{"name":"PIP_CERT","value":"/etc/squid-ca/squid-ca.pem"},{"name":"GIT_SSL_CAINFO","value":"/etc/squid-ca/squid-ca.pem"},{"name":"NODE_EXTRA_CA_CERTS","value":"/etc/squid-ca/squid-ca.pem"}],"image":"harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.9.0_a2_aarch64_builder:20260518","lifecycle":{"postStart":{"exec":{"command":["/bin/bash","-c","set +e\nS=/etc/squid-ca/squid-bazel-trust.jks\nJ=/etc/squid-bazel-trust/squid-bazel-trust.jks\nmkdir -p /etc/squid-bazel-trust\nif [ -f \"$S\" ]; then\n  if base64 -d \"$S\" \u003e \"$J\" 2\u003e/dev/null \u0026\u0026 [ -s \"$J\" ] \u0026\u0026 [ \"$(od -An -tx1 -N4 \"$J\" | tr -d ' ')\" = \"feedfeed\" ]; then\n    echo \"JKS decoded from base64 -\u003e $J\"\n  else\n    cp \"$S\" \"$J\" 2\u003e/dev/null\n    echo \"JKS copied -\u003e $J\"\n  fi\nfi\nmkdir -p /root\ncat \u003e /root/.bazelrc \u003c\u003c 'EOF'\nstartup --host_jvm_args=-Djavax.net.ssl.trustStore=/etc/squid-bazel-trust/squid-bazel-trust.jks\nstartup --host_jvm_args=-Djavax.net.ssl.trustStorePassword=changeit\ncommon --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/\nEOF\nchmod 644 /root/.bazelrc\nP=/etc/squid-ca/squid-ca.pem\nif [ -f \"$P\" ]; then\n  if [ -d /etc/pki/ca-trust/source/anchors ]; then\n    cp \"$P\" /etc/pki/ca-trust/source/anchors/squid-ca.pem \u003e/dev/null 2\u003e\u00261\n    update-ca-trust extract \u003e/dev/null 2\u003e\u00261\n  else\n    cp \"$P\" /usr/local/share/ca-certificates/squid-ca.crt \u003e/dev/null 2\u003e\u00261\n    update-ca-certificates -f \u003e/dev/null 2\u003e\u00261\n  fi\nfi\nif command -v apt-get \u003e/dev/null 2\u003e\u00261 \u0026\u0026 [ -n \"$HTTPS_PROXY\" ]; then\n  mkdir -p /etc/apt/apt.conf.d\n  printf 'Acquire::http::Proxy \"http://squid-cache.squid.svc.cluster.local:3128\";\\nAcquire::https::Proxy \"http://squid-cache.squid.svc.cluster.local:3128\";\\n' \u003e /etc/apt/apt.conf.d/99squid-proxy\nfi\nexit 0\n"]}}},"name":"ascend","resources":{"limits":{"huawei.com/ascend-1980":"1","memory":"128Gi"},"requests":{"cpu":"23","huawei.com/ascend-1980":"1","memory":"128Gi"}},"volumeMounts":[{"mountPath":"/usr/local/Ascend/driver","name":"ascend-driver","readOnly":true},{"mountPath":"/output","name":"output"},{"mountPath":"/etc/squid-ca","name":"squid-ca","readOnly":true}],"workingDir":"/workspace"}],"imagePullSecrets":[{"name":"huawei-swr-image-pull-secret-model-gy"}],"nodeSelector":{"kubernetes.io/arch":"arm64"},"restartPolicy":"Never","securityContext":{"runAsUser":0},"shareProcessNamespace":true,"volumes":[{"hostPath":{"path":"/usr/local/Ascend/driver"},"name":"ascend-driver"},{"emptyDir":{"sizeLimit":"10Gi"},"name":"output"},{"name":"squid-ca","secret":{"optional":true,"secretName":"squid-ca-cert"}}]}}}],"ttlSecondsAfterFinished":3600}}
+  labels:
+    huawei.com/ascend-1980: "1"
+    huawei.com/npu: "true"
+    jobPRID: "45122"
+    jobRepositoryName: ascend-pytorch
+    kubernetes.io/arch: arm64
+    pipeline/run-id: squid-reinject
+    squid.ci/reinject: "true"
+  name: op-plugin-ascend-pytorch-55xrv-ri
+  namespace: op-plugin
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  policies:
+  - action: AbortJob
+    event: PodFailed
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  - maxRetry: 1
+    minAvailable: 1
+    name: main-script
+    replicas: 1
+    template:
+      metadata:
+        annotations:
+          kubernetes.io/ingress-bandwidth: 150M
+      spec:
+        activeDeadlineSeconds: 14400
+        containers:
+        - args:
+          - "git config --global url.\"http://git-cache-http-server.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://gitcode.com\" || echo \"WARNING: git config failed for gitcode\"\ngit
+            config --global url.\"http://git-cache-github.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://gh-proxy.test.osinfra.cn/https://github.com\" || echo \"WARNING:
+            git config failed for github\"\ngit config --global url.\"http://git-cache-github.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://github.com\" || echo \"WARNING: git config failed for github\"\ngit
+            config --global url.\"http://git-cache-gitee.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://gitee.com\" || echo \"WARNING: git config failed for gitee\"\ngit
+            config --global url.\"http://git-cache-atomgit.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://atomgit.com\" || echo \"WARNING: git config failed for atomgit\"\ngit
+            config --global url.\"http://git-cache-codehub.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://codehub.devcloud.cn-north-4.huaweicloud.com\" || echo \"WARNING:
+            git config failed for codehub\"\n\n(trap 'EXIT_CODE=$?; [ \"$EXIT_CODE\"
+            -ne 0 ] && sleep 10' EXIT\n{\n    set +e\n    echo \"===== System Info
+            =====\"\n    echo \"===== OS =====\"\n    uname -a\n    human_bytes()
+            {\n        local bytes=$1\n        case \"$bytes\" in\n            max|-1)
+            echo \"unlimited\"; return ;;\n        esac\n        if [ \"${bytes#-}\"
+            != \"$bytes\" ]; then\n            echo \"unlimited\"\n            return\n
+            \       fi\n        if [ \"$bytes\" -ge 1073741824 ]; then\n            echo
+            \"$((bytes / 1073741824))GiB\"\n        elif [ \"$bytes\" -ge 1048576
+            ]; then\n            echo \"$((bytes / 1048576))MiB\"\n        elif [
+            \"$bytes\" -ge 1024 ]; then\n            echo \"$((bytes / 1024))KiB\"\n
+            \       else\n            echo \"${bytes}B\"\n        fi\n    }\n    echo
+            \"===== CPU =====\"\n    req_cores=\"\"\n    if [ -r /sys/fs/cgroup/cpu.weight
+            ]; then\n        weight=$(cat /sys/fs/cgroup/cpu.weight)\n        if [
+            -n \"$weight\" ] && [ \"$weight\" -gt 1 ] 2>/dev/null; then\n            req_cores=$((
+            ( ( (weight - 1) * 262142 / 9999 + 2 ) * 1000 / 1024 + 500 ) / 1000 ))\n
+            \       fi\n    elif [ -r /sys/fs/cgroup/cpu/cpu.shares ]; then\n        shares=$(cat
+            /sys/fs/cgroup/cpu/cpu.shares)\n        if [ -n \"$shares\" ] && [ \"$shares\"
+            -gt 2 ] 2>/dev/null; then\n            req_cores=$(( ( shares * 1000 /
+            1024 + 500 ) / 1000 ))\n        fi\n    fi\n    if [ -n \"$req_cores\"
+            ]; then\n        echo \"CPU request: ${req_cores} cores\"\n    fi\n    if
+            [ -r /sys/fs/cgroup/cpu.max ]; then\n        read -r quota period < /sys/fs/cgroup/cpu.max\n
+            \       if [ \"$quota\" != \"max\" ] && [ -n \"$period\" ] && [ \"$period\"
+            != \"0\" ]; then\n            echo \"CPU limit: $((quota / period)) cores\"\n
+            \       fi\n    elif [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ] && [ -r
+            /sys/fs/cgroup/cpu/cpu.cfs_period_us ]; then\n        quota=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us)\n
+            \       period=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)\n        if
+            [ \"$quota\" != \"-1\" ] && [ -n \"$period\" ] && [ \"$period\" != \"0\"
+            ]; then\n            echo \"CPU limit: $((quota / period)) cores\"\n        fi\n
+            \   fi\n    if [ -r /sys/fs/cgroup/cpu.stat ]; then\n        t1=$(grep
+            '^usage_usec ' /sys/fs/cgroup/cpu.stat | cut -d ' ' -f2)\n        sleep
+            1\n        t2=$(grep '^usage_usec ' /sys/fs/cgroup/cpu.stat | cut -d '
+            ' -f2)\n        if [ -n \"$t1\" ] && [ -n \"$t2\" ] && [ \"$t2\" -ge \"$t1\"
+            ] 2>/dev/null; then\n            echo \"CPU usage: $(awk -v d=\"$((t2
+            - t1))\" 'BEGIN { printf \"%.2f cores\", d / 1000000 }')\"\n        fi\n
+            \   elif [ -r /sys/fs/cgroup/cpuacct/cpuacct.usage ]; then\n        n1=$(cat
+            /sys/fs/cgroup/cpuacct/cpuacct.usage)\n        sleep 1\n        n2=$(cat
+            /sys/fs/cgroup/cpuacct/cpuacct.usage)\n        if [ -n \"$n1\" ] && [
+            -n \"$n2\" ] && [ \"$n2\" -ge \"$n1\" ] 2>/dev/null; then\n            echo
+            \"CPU usage: $(awk -v d=\"$((n2 - n1))\" 'BEGIN { printf \"%.2f cores\",
+            d / 1000000000 }')\"\n        fi\n    fi\n    echo \"===== Memory =====\"\n
+            \   if [ -r /sys/fs/cgroup/memory.max ]; then\n        echo \"Memory limit:
+            $(human_bytes \"$(cat /sys/fs/cgroup/memory.max)\")\"\n        if [ -r
+            /sys/fs/cgroup/memory.current ]; then\n            echo \"Memory usage:
+            $(human_bytes \"$(cat /sys/fs/cgroup/memory.current)\")\"\n        fi\n
+            \   elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then\n        echo
+            \"Memory limit: $(human_bytes \"$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)\")\"\n
+            \       if [ -r /sys/fs/cgroup/memory/memory.usage_in_bytes ]; then\n
+            \           echo \"Memory usage: $(human_bytes \"$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes)\")\"\n
+            \       fi\n    else\n        free -h\n    fi\n    echo \"===== NPU =====\"\n
+            \   if command -v npu-smi >/dev/null 2>&1; then\n        npu-smi info\n
+            \   else\n        echo \"npu-smi not available\"\n    fi\n} 2>/dev/null
+            || true\nif [ -n \"https://gitcode.com/Ascend/pytorch.git\" ]; then\n
+            \   CLONE_OK=true\n    git clone --single-branch -b \"v2.9.0-26.0.0\"
+            \"https://gitcode.com/Ascend/pytorch.git\" \"$WORKSPACE\" || {\n        mkdir
+            \"$WORKSPACE\" || echo \"WARNING: directory exists\"\n        echo \"WARNING:
+            主项目拉取失败！\"\n        CLONE_OK=false\n    }\n    cd \"$WORKSPACE\"\n    if
+            [ \"$CLONE_OK\" = \"true\" ]; then\n        git fetch origin +refs/merge-requests/45122/head:pr\n
+            \       git config --global user.name \"robot\"\n        git config --global
+            user.email \"your@emaple.com\"\n        git merge pr --no-ff -m \"Merge
+            v2.9.0-26.0.0 from refs/merge-requests/45122/head\" || {\n            echo
+            \"WARNING: 主项目merge失败！\"\n        }\n    fi\nfi\ncat > .bazelrc << 'EOF'\n#
+            Use GitHub BCR source as the registry\ncommon --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/\nEOF\nset
+            -ex\n# 工作目录清空\nrm -rf *\n# 下载CI仓代码\ngit clone -b master https://codehub.devcloud.cn-north-4.huaweicloud.com/a9b188a62f334fc0963bcfb523426d17/ci_gitcode.git
+            cie\n# 代码预合并\nbash cie/common/common/merge.sh v2.9.0-26.0.0 https://gitcode.com/Ascend/pytorch.git
+            45122 /workspace \ncd /workspace/CODE\nbash /workspace/cie/common/common/retry_command.sh
+            \"git submodule update --init --recursive --force third_party/op-plugin
+            \ third_party/torchair/torchair\"\ngit diff-tree -r --name-only --no-commit-id
+            origin/v2.9.0-26.0.0 HEAD > ../modify_files.txt\ncat ../modify_files.txt
+            \ncd /workspace\nbash cie/common/UT/pytorch_ut_general.sh v2.9.0-26.0.0
+            3.10 45122 /workspace 1 2 no\n\ncd ${WORKSPACE}\ncp -r --parents CODE/time_data.json
+            /output/\n); _ec=$?; echo $_ec > /output/.ascend-done; exit $_ec"
+          command:
+          - bash
+          - -c
+          env:
+          - name: WORKSPACE
+            value: /workspace
+          - name: workspace
+            value: /workspace
+          - name: GOPROXY
+            value: http://cache-service.nginx-pypi-cache.svc.cluster.local:8084|https://goproxy.cn|direct
+          - name: GOSUMDB
+            value: sum.golang.google.cn
+          - name: CODEARTS_OUTPUT
+            value: ${WORKSPACE}/.ci_user_output
+          - name: TEST_RANK
+            value: "1"
+          - name: TRIGGER_TYPE
+            value: Generic
+          - name: JOB_NAME
+            value: j_XPR9V6TN
+          - name: REPOSITORY_NAME
+            value: "1"
+          - name: MAX_JOBS
+            value: "23"
+          - name: TIMESTAMP
+            value: "20260821222519"
+          - name: jobType
+            value: codeci
+          - name: BASH_ENV
+            value: /usr/local/bin/signal_forward.sh
+          - name: CLOUD_BUILD_BUILD_YAML_PATH
+            value: .cloudbuild/build.yml
+          - name: STAGE_NAME
+            value: stage5
+          - name: BUILD_NUMBER
+            value: "1"
+          - name: COMMIT_ID
+            value: db1cf00061cb39f18efe828015d1cbba1ddee5e8
+          - name: CLOUD_BUILD_BUILD_TYPE
+            value: JOB
+          - name: NPU_CORE
+            value: "no"
+          - name: BUILD_DISPLAY_NAME
+            value: '#1'
+          - name: jobName
+            value: j_XPR9V6TN
+          - name: TARGET_BRANCH
+            value: v2.9.0-26.0.0
+          - name: CODEARTS_BUILD_META
+            value: ${WORKSPACE}/.ci_build_meta
+          - name: JENKINS_SERVER_COOKIE
+            value: durable-993b64c4b0fb04bf4b059b136185c7ea
+          - name: ___workspace___
+            value: /workspace
+          - name: EXECUTOR_NUMBER
+            value: "0"
+          - name: image
+            value: swr.cn-north-4.myhuaweicloud.com/octopus_jnlp/dockerjnlp:4.2.1
+          - name: CLOUD_BUILD_RECORD_ID
+            value: 8aab9015-6a22-4d56-bd91-fb2f0d93eb66
+          - name: CLOUD_BUILD_ENV
+            value: prod
+          - name: WORKSPACE_TMP
+            value: /devcloud/slavespace/slave1-new/workspace/j_XPR9V6TN@tmp
+          - name: CLOUD_BUILD_LANGUAGE
+            value: zh-cn
+          - name: CLOUD_BUILD_DOMAIN_TAG
+            value: hwstaff_jsz_gjl
+          - name: BUILDNUMBER
+            value: "20260821.381"
+          - name: PROJECT_ID
+            value: a9b188a62f334fc0963bcfb523426d17
+          - name: CLOUD_BUILD_REPO_URL
+            value: https://gitcode.com/pta-robot/pytorch_op.git
+          - name: Preference
+            value: '[]'
+          - name: LC_ALL
+            value: en_US.utf8
+          - name: CLOUD_BUILD_PROJECT_API_URL
+            value: https://cloudbuild-backend.cn-north-4.myhuaweicloud.com:8443/build-project-api
+          - name: __repository__
+            value: '{"repo_name":"pytorch","url":"https://gitcode.com/Ascend/pytorch.git"}'
+          - name: INCREASENUM
+            value: "31842"
+          - name: CLOUD_BUILD_ENV_INFO
+            value: devcloud:prod
+          - name: GIT_COMMIT
+            value: db1cf00061cb39f18efe828015d1cbba1ddee5e8
+          - name: CLOUD_BUILD_DOMAIN_NAME
+            value: hwstaff_jsz_gjl
+          - name: CLOUD_BUILD_TIMESTAMP
+            value: "1787322323152"
+          - name: JOB_ID
+            value: 36b3ad882bae44cdafff7329ccb9e33e
+          - name: jobId
+            value: XPR9V6TN
+          - name: CLOUD_BUILD_CONTEXT_PATH
+            value: /build-project-api
+          - name: COMMIT_ID_SHORTER
+            value: db1cf000
+          - name: JOB_BASE_NAME
+            value: j_XPR9V6TN
+          - name: CMAKE_BUILD_PARALLEL_LEVEL
+            value: "23"
+          - name: CLOUD_BUILD_JOB_DISPLAY_NAME
+            value: UT_pytorch_ARM_A2_pool_Select_2
+          - name: CLOUD_BUILD_PROJECT_NAME
+            value: UT_pytorch_ARM_A2_pool_Select_2
+          - name: namespace
+            value: argo
+          - name: CI
+            value: "false"
+          - name: codeBranch
+            value: v2.9.0-26.0.0
+          - name: pr_id
+            value: "45122"
+          - name: BUILD_ID
+            value: "1"
+          - name: CLOUD_BUILD_TRIGGER_USER
+            value: hwstaff_jsz_gjl/pipeline_admin_trust
+          - name: repoUrl
+            value: https://gitcode.com/pta-robot/pytorch_op.git
+          - name: REMOTE_URL
+            value: https://gitcode.com/Ascend/pytorch.git
+          - name: CLOUD_BUILD_SERVER_URL
+            value: https://cloudbuild-backend.cn-north-4.myhuaweicloud.com:8443/
+          - name: CLOUD_BUILD_TRIGGER_USER_ID
+            value: 538b80346627462c9a39b8d3c65612a6
+          - name: py_version
+            value: "3.10"
+          - name: ___JOB_NAME___
+            value: UT_pytorch_ARM_A2_pool_Select_2
+          - name: GIT_BRANCH
+            value: origin/v2.9.0-26.0.0
+          - name: slaveType
+            value: k8sdockerondocker
+          - name: LANGUAGE
+            value: en_US.utf8
+          - name: CLOUD_BUILD_ANALYSIS_URL
+            value: https://172.22.1.78:7533/buildcheckanalysis
+          - name: HOSTNAME
+            value: e786d351a240
+          - name: CLOUD_BUILD_TRIGGER_TYPE
+            value: MANUAL
+          - name: CLOUD_BUILD_ENV_REGION
+            value: kunpeng
+          - name: TEST_WORLD_SIZE
+            value: "2"
+          - name: GIT_LOCAL_BRANCH
+            value: v2.9.0-26.0.0
+          - name: EXECUTOR
+            value: hwstaff_jsz_gjl/pipeline_admin_trust
+          - name: CLOUD_BUILD_DOMAIN_ID
+            value: 0d336831568090260fd5c01450729240
+          - name: pipeline_id
+            value: "1"
+          - name: CLOUD_BUILD_PROJECT_ID
+            value: fdbb4248-97bc-427a-a77f-4f720e89627a
+          - name: pipelineRunId
+            value: 1c9d7ea4577d4094b436dcbd4ef7c68c
+          - name: SOURCE_NAME
+            value: pytorch_op
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,172.22.1.78,triton-ascend.osinfra.cn,hf-mirror.com,git-cache-http-server.git-cache,git-cache-http-server.git-cache.svc.cluster.local,git-cache-github.git-cache,git-cache-github.git-cache.svc.cluster.local,git-cache-gitee.git-cache,git-cache-gitee.git-cache.svc.cluster.local,git-cache-atomgit.git-cache,git-cache-atomgit.git-cache.svc.cluster.local,git-cache-codehub.git-cache,git-cache-codehub.git-cache.svc.cluster.local,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,172.22.1.78,triton-ascend.osinfra.cn,hf-mirror.com,git-cache-http-server.git-cache,git-cache-http-server.git-cache.svc.cluster.local,git-cache-github.git-cache,git-cache-github.git-cache.svc.cluster.local,git-cache-gitee.git-cache,git-cache-gitee.git-cache.svc.cluster.local,git-cache-atomgit.git-cache,git-cache-atomgit.git-cache.svc.cluster.local,git-cache-codehub.git-cache,git-cache-codehub.git-cache.svc.cluster.local,.svc.cluster.local,.cluster.local
+          - name: SSL_CERT_FILE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: CURL_CA_BUNDLE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: REQUESTS_CA_BUNDLE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: PIP_CERT
+            value: /etc/squid-ca/squid-ca.pem
+          - name: GIT_SSL_CAINFO
+            value: /etc/squid-ca/squid-ca.pem
+          - name: NODE_EXTRA_CA_CERTS
+            value: /etc/squid-ca/squid-ca.pem
+          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.9.0_a2_aarch64_builder:20260518
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                - /bin/bash
+                - -c
+                - |
+                  set +e
+                  S=/etc/squid-ca/squid-bazel-trust.jks
+                  J=/etc/squid-bazel-trust/squid-bazel-trust.jks
+                  mkdir -p /etc/squid-bazel-trust
+                  if [ -f "$S" ]; then
+                    if base64 -d "$S" > "$J" 2>/dev/null && [ -s "$J" ] && [ "$(od -An -tx1 -N4 "$J" | tr -d ' ')" = "feedfeed" ]; then
+                      echo "JKS decoded from base64 -> $J"
+                    else
+                      cp "$S" "$J" 2>/dev/null
+                      echo "JKS copied -> $J"
+                    fi
+                  fi
+                  mkdir -p /root
+                  cat > /root/.bazelrc << 'EOF'
+                  startup --host_jvm_args=-Djavax.net.ssl.trustStore=/etc/squid-bazel-trust/squid-bazel-trust.jks
+                  startup --host_jvm_args=-Djavax.net.ssl.trustStorePassword=changeit
+                  common --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/
+                  EOF
+                  chmod 644 /root/.bazelrc
+                  P=/etc/squid-ca/squid-ca.pem
+                  if [ -f "$P" ]; then
+                    if [ -d /etc/pki/ca-trust/source/anchors ]; then
+                      cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                      update-ca-trust extract >/dev/null 2>&1
+                    else
+                      cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                      update-ca-certificates -f >/dev/null 2>&1
+                    fi
+                  fi
+                  if command -v apt-get >/dev/null 2>&1 && [ -n "$HTTPS_PROXY" ]; then
+                    mkdir -p /etc/apt/apt.conf.d
+                    printf 'Acquire::http::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\nAcquire::https::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\n' > /etc/apt/apt.conf.d/99squid-proxy
+                  fi
+                  exit 0
+          name: ascend
+          resources:
+            limits:
+              huawei.com/ascend-1980: "1"
+              memory: 128Gi
+            requests:
+              cpu: "23"
+              huawei.com/ascend-1980: "1"
+              memory: 128Gi
+          volumeMounts:
+          - mountPath: /usr/local/Ascend/driver
+            name: ascend-driver
+            readOnly: true
+          - mountPath: /output
+            name: output
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+          workingDir: /workspace
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        shareProcessNamespace: true
+        volumes:
+        - hostPath:
+            path: /usr/local/Ascend/driver
+          name: ascend-driver
+        - emptyDir:
+            sizeLimit: 10Gi
+          name: output
+        - name: squid-ca
+          secret:
+            optional: true
+            secretName: squid-ca-cert
+  ttlSecondsAfterFinished: 3600

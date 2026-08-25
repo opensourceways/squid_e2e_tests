@@ -7,6 +7,10 @@ replicas: 2
 nodeSelector: {}
 nodeAffinity: {}
 
+# Image pull secrets (e.g. huawei-swr-image-pull-secret-model-gy) for pulling
+# images from the private SWR registry.
+imagePullSecrets: []
+
 # Probe tuning. readiness drives Service endpoint membership, so keep it
 # fast: 5s x 2 = worst-case ~10s to drop a dead endpoint (HTTP cachemgr
 # check, not TCP - catches stuck-but-listening squid).

@@ -1,0 +1,1082 @@
+[
+ {
+  "type_key": "01a6886a0557197270eb7a3ef2997438f03f5d40",
+  "desc": "pytorch_2.12.0_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | v2.12.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-zx7w2",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787584817.0020065,
+  "yaml": "op-plugin-ascend-pytorch-zx7w2.yaml",
+  "labels": {
+   "jobPRID": "44841",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "486a823a943f428689e034a87935fece"
+  }
+ },
+ {
+  "type_key": "04133b7c25a6c6cb88f2f5121bc8de5881ce4db5",
+  "desc": "pytorch_2.13.0_a2_aarch64_builder:20260709 | no-ut | master",
+  "ns": "op-plugin",
+  "name": "ascend-op-plugin-dqd2r",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787625617.0605881,
+  "yaml": "op-plugin-ascend-op-plugin-dqd2r.yaml",
+  "labels": {
+   "jobPRID": "5697",
+   "jobRepositoryName": "ascend-op-plugin",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "8798a310e3fb446f913b63b4bfc3a672"
+  }
+ },
+ {
+  "type_key": "089d2e4d48baf85b3c0a6b17c1fe9690c9b138a3",
+  "desc": "pytorch_2.10.0_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | v2.10.0-26.0.0",
+  "ns": "op-plugin",
+  "name": "op-plugin-ascend-pytorch-v7kc6-ri",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787236816.546643,
+  "yaml": "op-plugin-op-plugin-ascend-pytorch-v7kc6-ri.yaml",
+  "labels": {
+   "jobPRID": "44907",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "squid-reinject"
+  }
+ },
+ {
+  "type_key": "090877547b6ef9a82282090e96771a911695319b",
+  "desc": "pytorch_2.10.0_a2_aarch64_builder:20260804 | pytorch_ut_inductor.sh | v2.10.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-pdcx7",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787577136.991542,
+  "yaml": "op-plugin-ascend-pytorch-pdcx7.yaml",
+  "labels": {
+   "jobPRID": "45234",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "e565f97174454d94a7ca4d3979a35360"
+  }
+ },
+ {
+  "type_key": "130c0270c80fcba569baf3134e86b585f3587eca",
+  "desc": "pytorch_2.10.0_a2_aarch64_builder:20260804 | pytorch_ut_dist.sh | v2.10.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-nlmb8",
+  "phases": [
+   "Pending",
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787328676.667545,
+  "yaml": "op-plugin-ascend-pytorch-nlmb8.yaml",
+  "labels": {
+   "jobPRID": "44993",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "c3c3eb2eca61499e8a23e66589749803"
+  }
+ },
+ {
+  "type_key": "13b689c135a8ff247db8f1293e8b0e6471475911",
+  "desc": "pytorch_2.7.1_a2_aarch64_builder | no-ut | no-branch",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-rjqqt",
+  "phases": [
+   "Pending",
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787194636.4921515,
+  "yaml": "op-plugin-ascend-pytorch-rjqqt.yaml",
+  "labels": {
+   "jobPRID": "44906",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "801d86ceecd8414b9a673296b9e406f7"
+  }
+ },
+ {
+  "type_key": "1645c55599a05b1b9a35a69fa482263b27968170",
+  "desc": "pytorch_2.9.0_a2_aarch64_builder:20260518 | pytorch_ut_general.sh | v2.9.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-rkvbb",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787565376.9754343,
+  "yaml": "op-plugin-ascend-pytorch-rkvbb.yaml",
+  "labels": {
+   "jobPRID": "45205",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "43a857a625b24605950d17d97bdf2d73"
+  }
+ },
+ {
+  "type_key": "26202f4f6de962486eadb4151f04c621ab7c63eb",
+  "desc": "pytorch_2.10.0_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | v2.10.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-rtggk",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787618177.0497751,
+  "yaml": "op-plugin-ascend-pytorch-rtggk.yaml",
+  "labels": {
+   "jobPRID": "45265",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "b0fd53d8f4224485aeee0feb2a8a3f7e"
+  }
+ },
+ {
+  "type_key": "31b05f95fe28df6e0e6b1fc603b181a5153abef2",
+  "desc": "pytorch_2.9.0_a2_aarch64_builder:20260518 | pytorch_ut_general.sh | v2.9.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-qprns",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787581516.997571,
+  "yaml": "op-plugin-ascend-pytorch-qprns.yaml",
+  "labels": {
+   "jobPRID": "45257",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "ab0ecfa6fc5044c8bcc9f9519410282c"
+  }
+ },
+ {
+  "type_key": "33b4eae24c953b5091b583af13bd5a813c97c396",
+  "desc": "pytorch_2.11.0_a2_aarch64_builder:20260518 | no-ut | master",
+  "ns": "op-plugin",
+  "name": "ascend-op-plugin-zncgv",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787624177.0583785,
+  "yaml": "op-plugin-ascend-op-plugin-zncgv.yaml",
+  "labels": {
+   "jobPRID": "5697",
+   "jobRepositoryName": "ascend-op-plugin",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "8798a310e3fb446f913b63b4bfc3a672"
+  }
+ },
+ {
+  "type_key": "36d92f95f64fb6a2e400848b27efb2f9c6a43cdf",
+  "desc": "pytorch_2.11.0_a2_aarch64_builder:20260804 | pytorch_ut_dist.sh | v2.11.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-bhlxm",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787580976.996875,
+  "yaml": "op-plugin-ascend-pytorch-bhlxm.yaml",
+  "labels": {
+   "jobPRID": "45254",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "dcf4b090febb4b8294f159eac10acfa2"
+  }
+ },
+ {
+  "type_key": "3e939d14d7fb7ce2efc484daa5120213c7fad171",
+  "desc": "pytorch_master_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | master",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-xq8bb",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787622617.056054,
+  "yaml": "op-plugin-ascend-pytorch-xq8bb.yaml",
+  "labels": {
+   "jobPRID": "45237",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "9ca678311f7d4ae09ca28bd6de162610"
+  }
+ },
+ {
+  "type_key": "3ea9f77c7dc7d5dd4008fea1cf481839bc1c45d6",
+  "desc": "pr-mindspeed-mm:v26.1.0-cann9.0.0-torch_npu2.7.1.post6-910b-openeuler24.03-py3.11-aarch64-ci-0824 | no-ut | no-branch",
+  "ns": "mindspeed-mm",
+  "name": "ascend-mindspeed-mm-n5dwd",
+  "phases": [
+   "Pending",
+   "Running",
+   "Aborted"
+  ],
+  "terminal": "Aborted",
+  "terminal_ts": 1787626157.0613632,
+  "yaml": "mindspeed-mm-ascend-mindspeed-mm-n5dwd.yaml",
+  "labels": {
+   "jobPRID": "3030",
+   "jobRepositoryName": "ascend-mindspeed-mm",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "dd3777cf2b55432c89836c1be122a2e6"
+  }
+ },
+ {
+  "type_key": "40aef5898fe5a56e3052388651c2e705af05d090",
+  "desc": "pytorch_2.11.0_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | v2.11.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-rfdhj",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787574856.9883244,
+  "yaml": "op-plugin-ascend-pytorch-rfdhj.yaml",
+  "labels": {
+   "jobPRID": "45235",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "33d3fbdf5e66438b9eaee2a1e1db9a2f"
+  }
+ },
+ {
+  "type_key": "4ac33d52fb441ea8540c6a90b23b01a15fc5c854",
+  "desc": "pytorch_2.9.0_a2_aarch64_builder | no-ut | no-branch",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-wgqqr",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787195416.49338,
+  "yaml": "op-plugin-ascend-pytorch-wgqqr.yaml",
+  "labels": {
+   "jobPRID": "44943",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "cf407bd16b11406dbf03bba407c021f3"
+  }
+ },
+ {
+  "type_key": "505253772d4181f9cb24350f9348bc9508226ae5",
+  "desc": "pytorch_2.12.0_a2_aarch64_builder:20260804 | pytorch_ut_dist.sh | v2.12.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-xvscr",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787581036.9969628,
+  "yaml": "op-plugin-ascend-pytorch-xvscr.yaml",
+  "labels": {
+   "jobPRID": "45255",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "2abaf7c8f36348e7bdd02b0c7f456ea8"
+  }
+ },
+ {
+  "type_key": "53a251b2f3438408ef038f50f17fb680fecfae67",
+  "desc": "pytorch_2.9.0_a2_aarch64_builder:20260518 | pytorch_ut_general.sh | v2.9.0-26.0.0",
+  "ns": "op-plugin",
+  "name": "op-plugin-ascend-pytorch-55xrv-ri",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787322916.6599574,
+  "yaml": "op-plugin-op-plugin-ascend-pytorch-55xrv-ri.yaml",
+  "labels": {
+   "jobPRID": "45122",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "squid-reinject"
+  }
+ },
+ {
+  "type_key": "5551dc150075499259400a0f05ed896347273ba3",
+  "desc": "pytorch_2.11.0_a2_aarch64_builder:20260804 | pytorch_ut_inductor.sh | v2.11.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-6g2n5",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787556736.9642973,
+  "yaml": "op-plugin-ascend-pytorch-6g2n5.yaml",
+  "labels": {
+   "jobPRID": "44994",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "9116584b060041a5a32e760da2d597ea"
+  }
+ },
+ {
+  "type_key": "639503f53a5a8bf600f2d90e8bd5258d1b0497b8",
+  "desc": "pytorch_2.10.0_a2_aarch64_builder:20260804 | pytorch_ut_inductor.sh | v2.10.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-77nvw",
+  "phases": [
+   "Pending",
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787585357.0026855,
+  "yaml": "op-plugin-ascend-pytorch-77nvw.yaml",
+  "labels": {
+   "jobPRID": "45261",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "8a45f77c62c846e2a5fd43dcae557d79"
+  }
+ },
+ {
+  "type_key": "660d5e2aa782943889578b9a16b072555f71af25",
+  "desc": "pytorch_2.7.1_a2_aarch64_builder:20260804 | pytorch_ut_dist.sh | v2.7.1-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-qcg9t",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787300596.6300895,
+  "yaml": "op-plugin-ascend-pytorch-qcg9t.yaml",
+  "labels": {
+   "jobPRID": "44996",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "d1e5d630e2954e90895102e34a43570f"
+  }
+ },
+ {
+  "type_key": "6e83bb0188303b6d1687995630f9e4bcdb496b46",
+  "desc": "pytorch_2.10.0_a2_aarch64_builder | no-ut | no-branch",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-zm2hw",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787196436.4947572,
+  "yaml": "op-plugin-ascend-pytorch-zm2hw.yaml",
+  "labels": {
+   "jobPRID": "44946",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "29d2098949054fd5af8c7a557d9dc359"
+  }
+ },
+ {
+  "type_key": "7894ca3bcecffa9742a45ba629efe0ab509ba5c4",
+  "desc": "pytorch_2.9.0_a2_aarch64_builder:20260518 | pytorch_ut_inductor.sh | v2.9.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-nl96j",
+  "phases": [
+   "Pending",
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787565856.9761717,
+  "yaml": "op-plugin-ascend-pytorch-nl96j.yaml",
+  "labels": {
+   "jobPRID": "45205",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "43a857a625b24605950d17d97bdf2d73"
+  }
+ },
+ {
+  "type_key": "7c08b453c9bb17decc49b9214e50c3e833249a00",
+  "desc": "pytorch_2.10.0_a2_aarch64_builder:20260518 | no-ut | master",
+  "ns": "op-plugin",
+  "name": "ascend-op-plugin-g58hs",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787623877.05784,
+  "yaml": "op-plugin-ascend-op-plugin-g58hs.yaml",
+  "labels": {
+   "jobPRID": "5697",
+   "jobRepositoryName": "ascend-op-plugin",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "8798a310e3fb446f913b63b4bfc3a672"
+  }
+ },
+ {
+  "type_key": "7e1a544d375de21a8fb5fbf5986dd1546c813740",
+  "desc": "1 | pytorch_ut_dist.sh | master",
+  "ns": "op-plugin",
+  "name": "op-plugin-ascend-pytorch-mhnwp-ri",
+  "phases": [
+   "Pending",
+   "Aborted"
+  ],
+  "terminal": "Aborted",
+  "terminal_ts": 1787169602.5097194,
+  "yaml": "op-plugin-op-plugin-ascend-pytorch-mhnwp-ri.yaml",
+  "labels": {
+   "jobPRID": "44256",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "squid-reinject"
+  }
+ },
+ {
+  "type_key": "81588bdf8955f59156d4f4f8910b16f19fab789e",
+  "desc": "pytorch_2.9.0_a2_aarch64_builder:20260518 | pytorch_ut_dist.sh | v2.9.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-x7zq4",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787288476.6142397,
+  "yaml": "op-plugin-ascend-pytorch-x7zq4.yaml",
+  "labels": {
+   "jobPRID": "44992",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "5571e6b114394f26bdf6b2a3ea3188f8"
+  }
+ },
+ {
+  "type_key": "82066243b73b1a3dce726d126e7127693a532e47",
+  "desc": "pr-mindspeed-bridge:master-910b-openeuler24.03-cann9.1.0-beta.3-torchnpu2.9.0-py3.12-aarch64 | no-ut | master",
+  "ns": "mindspeed-bridge",
+  "name": "ascend-mindspeed-bridge-6m4qk",
+  "phases": [
+   "Running",
+   "Aborted"
+  ],
+  "terminal": "Aborted",
+  "terminal_ts": 1787621657.0549018,
+  "yaml": "mindspeed-bridge-ascend-mindspeed-bridge-6m4qk.yaml",
+  "labels": {
+   "jobPRID": "93",
+   "jobRepositoryName": "ascend-mindspeed-bridge",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "0b138a80c58742f8942cb4be1e29614d"
+  }
+ },
+ {
+  "type_key": "824cdb1d757fa82a06ccf50642324a0db7b3d19e",
+  "desc": "pytorch_2.12.0_a2_aarch64_builder:20260804 | pytorch_ut_dist.sh | v2.12.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-q9bvn",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787298556.627387,
+  "yaml": "op-plugin-ascend-pytorch-q9bvn.yaml",
+  "labels": {
+   "jobPRID": "45000",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "54e05f2e7f36473db00991098839b29e"
+  }
+ },
+ {
+  "type_key": "8cba161fa69d201756c0d3ac3eb15c3341efbd3a",
+  "desc": "pytorch_2.10.0_a2_aarch64_builder:20260804 | pytorch_ut_dist.sh | v2.10.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-zp552",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787322556.6594937,
+  "yaml": "op-plugin-ascend-pytorch-zp552.yaml",
+  "labels": {
+   "jobPRID": "45117",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "c564bdabe39d46af9aed3e370c493916"
+  }
+ },
+ {
+  "type_key": "8f2ab07ef84c0662245728903284536bd65dd3bf",
+  "desc": "pytorch_2.9.0_a2_aarch64_builder:20260518 | pytorch_ut_dist.sh | v2.9.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "op-plugin-ascend-pytorch-fvnhx-ri",
+  "phases": [
+   "Pending",
+   "Running",
+   "Aborted"
+  ],
+  "terminal": "Aborted",
+  "terminal_ts": 1787299216.6282947,
+  "yaml": "op-plugin-op-plugin-ascend-pytorch-fvnhx-ri.yaml",
+  "labels": {
+   "jobPRID": "44997",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "squid-reinject"
+  }
+ },
+ {
+  "type_key": "a38d44559a328406d0212f4af1222555ae4daccf",
+  "desc": "pytorch_2.11.0_a2_aarch64_builder:20260804 | pytorch_ut_dist.sh | v2.11.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-s8jkl",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787290096.616363,
+  "yaml": "op-plugin-ascend-pytorch-s8jkl.yaml",
+  "labels": {
+   "jobPRID": "44999",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "63ac626551b64c30aee1d99c4f44d751"
+  }
+ },
+ {
+  "type_key": "a55ee33d4c7481d0d7d6ec32905fa030f9e477f4",
+  "desc": "pytorch_2.9.0_a2_aarch64_builder:20260518 | pytorch_ut_inductor.sh | v2.9.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-q2nr8",
+  "phases": [
+   "Pending",
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787544376.9482646,
+  "yaml": "op-plugin-ascend-pytorch-q2nr8.yaml",
+  "labels": {
+   "jobPRID": "45001",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "9718bfba710140b7a7bb54b3f320d7c3"
+  }
+ },
+ {
+  "type_key": "ade811eebeb5a8a6c36a44d5a052fd74bf65f008",
+  "desc": "pytorch_2.13.0_a2_aarch64_builder:20260804 | pytorch_ut_inductor.sh | master",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-j5k86",
+  "phases": [
+   "Running",
+   "Aborted"
+  ],
+  "terminal": "Aborted",
+  "terminal_ts": 1787575156.9886596,
+  "yaml": "op-plugin-ascend-pytorch-j5k86.yaml",
+  "labels": {
+   "jobPRID": "44022",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "e5d470b1e4d3452aa8c5b6766e825b2e"
+  }
+ },
+ {
+  "type_key": "af3ffd281db6f9305ab5027468d94292bdc3cd33",
+  "desc": "pytorch_2.7.1_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | v2.7.1-26.0.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-x9lmp",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787573116.9862492,
+  "yaml": "op-plugin-ascend-pytorch-x9lmp.yaml",
+  "labels": {
+   "jobPRID": "42586",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "00cbb655034149009be178d84fe1b2b5"
+  }
+ },
+ {
+  "type_key": "b19a391ac557917092a383c6f08c358e56d9f267",
+  "desc": "pytorch_2.13.0_a2_aarch64_builder:20260804 | pytorch_ut_dist.sh | master",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-v72c6",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787581096.9970415,
+  "yaml": "op-plugin-ascend-pytorch-v72c6.yaml",
+  "labels": {
+   "jobPRID": "45252",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "058572d164df41988ca33d1883e580eb"
+  }
+ },
+ {
+  "type_key": "b29694e40937bbbd9e30d3c51e1906cc16248ba4",
+  "desc": "pytorch_2.11.0_a2_aarch64_builder:20260804 | pytorch_ut_inductor.sh | v2.11.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-gjddb",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787577256.991724,
+  "yaml": "op-plugin-ascend-pytorch-gjddb.yaml",
+  "labels": {
+   "jobPRID": "45235",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "33d3fbdf5e66438b9eaee2a1e1db9a2f"
+  }
+ },
+ {
+  "type_key": "b2e6581a1020ccfa55bc58c8b3e28fb36a05b911",
+  "desc": "pytorch_2.7.1_a2_aarch64_builder:20260804 | pytorch_ut_inductor.sh | v2.7.1-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-sjzsw",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787576776.9911356,
+  "yaml": "op-plugin-ascend-pytorch-sjzsw.yaml",
+  "labels": {
+   "jobPRID": "45232",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "9b6e68a3411e4deebcf2c7ec13df5a1a"
+  }
+ },
+ {
+  "type_key": "bd637fca090f62825ad03d00739689b07d030806",
+  "desc": "drivingsdk_arm:cann8.5.0 | no-ut | no-branch",
+  "ns": "mindspeed-bridge",
+  "name": "mindspeed-bridge-ascend-mindspeed-bridge-5685l-ri",
+  "phases": [
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787194516.4920146,
+  "yaml": "mindspeed-bridge-mindspeed-bridge-ascend-mindspeed-bridge-5685l-ri.yaml",
+  "labels": {
+   "jobRepositoryName": "ascend-mindspeed-bridge",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "squid-reinject"
+  }
+ },
+ {
+  "type_key": "be2ecefc647d0677f33116aa24d6d80d6aeb71ff",
+  "desc": "pytorch_2.7.1_a2_aarch64_builder:20260804 | pytorch_ut_inductor.sh | v2.7.1",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-t86g6",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787580796.9966564,
+  "yaml": "op-plugin-ascend-pytorch-t86g6.yaml",
+  "labels": {
+   "jobPRID": "45242",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "67f38d0083b949f29aa7362c4fe5425b"
+  }
+ },
+ {
+  "type_key": "c242c4c1a0641a0cc1108318f98798a52c2c2be2",
+  "desc": "pytorch_2.12.0_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | v2.12.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-n9bnx",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787563636.9732695,
+  "yaml": "op-plugin-ascend-pytorch-n9bnx.yaml",
+  "labels": {
+   "jobPRID": "45208",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "5bde43ccaf5c42b782bc706a9e7884d1"
+  }
+ },
+ {
+  "type_key": "c260a2d84885a8e9011ac3b5148331af15d96623",
+  "desc": "pytorch_2.13.0_a2_aarch64_builder | no-ut | no-branch",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-nbrvp",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787193616.4907017,
+  "yaml": "op-plugin-ascend-pytorch-nbrvp.yaml",
+  "labels": {
+   "jobPRID": "44941",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "c91d3a76729e487ba141f06bb29d3734"
+  }
+ },
+ {
+  "type_key": "c37d028a7a5c3be313e0aa3d17282ec4f269d16b",
+  "desc": "alpine:3.23.3 | no-ut | no-branch",
+  "ns": "argo",
+  "name": "testorg-testrepo-test9-59258",
+  "phases": [
+   "Aborted"
+  ],
+  "terminal": "Aborted",
+  "terminal_ts": 1787111146.8357308,
+  "yaml": "argo-testorg-testrepo-test9-59258.yaml",
+  "labels": {
+   "jobPRID": "100",
+   "jobRepositoryName": "testorg-testrepo-test9",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "test-910b4-123"
+  }
+ },
+ {
+  "type_key": "cb2b69db532f4e24ad8b1720e1cbce43a221aaa9",
+  "desc": "rclone:sha-adc7f2e | no-ut | no-branch",
+  "ns": "ascend-data-sync",
+  "name": "syncpvc-gy2wlcb",
+  "phases": [
+   "Aborted",
+   "Running",
+   "Pending"
+  ],
+  "terminal": "Aborted",
+  "terminal_ts": 1787228356.5355837,
+  "yaml": "ascend-data-sync-syncpvc-gy2wlcb.yaml",
+  "labels": {}
+ },
+ {
+  "type_key": "ce900cb9c5bb451d4ac8c74d7d4acb27338de0ad",
+  "desc": "pytorch_master_a2_aarch64_builder | pytorch_ut_inductor.sh | master",
+  "ns": "op-plugin",
+  "name": "op-plugin-ascend-pytorch-lkjxx-ri",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787154302.486157,
+  "yaml": "op-plugin-op-plugin-ascend-pytorch-lkjxx-ri.yaml",
+  "labels": {
+   "jobPRID": "44256",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "squid-reinject"
+  }
+ },
+ {
+  "type_key": "d0f578030f71cfccb93fc8a1e91e3b4d99e86fa9",
+  "desc": "pytorch_master_a2_aarch64_builder | no-ut | no-branch",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-s4b7m",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787193556.4906244,
+  "yaml": "op-plugin-ascend-pytorch-s4b7m.yaml",
+  "labels": {
+   "jobPRID": "44941",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "c91d3a76729e487ba141f06bb29d3734"
+  }
+ },
+ {
+  "type_key": "d65b7cb9971c2b57182681c360f5c06136a0214e",
+  "desc": "pytorch_2.7.1_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | v2.7.1-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-wwx4f",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787574616.9880393,
+  "yaml": "op-plugin-ascend-pytorch-wwx4f.yaml",
+  "labels": {
+   "jobPRID": "45232",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "9b6e68a3411e4deebcf2c7ec13df5a1a"
+  }
+ },
+ {
+  "type_key": "d9e3d6a68e0b9a1666f55846fdd36529d8ffcd05",
+  "desc": "pytorch_2.7.1_a2_aarch64_builder:20260804 | pytorch_ut_dist.sh | v2.7.1",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-ml4sw",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787580736.9965956,
+  "yaml": "op-plugin-ascend-pytorch-ml4sw.yaml",
+  "labels": {
+   "jobPRID": "45253",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "4c97a3334766470b9584cde53338a166"
+  }
+ },
+ {
+  "type_key": "de634461357a7270628f88234a4b3e5eb125f4a3",
+  "desc": "pytorch_2.12.0_a2_aarch64_builder:20260518 | no-ut | master",
+  "ns": "op-plugin",
+  "name": "ascend-op-plugin-sst4q",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787624057.0580592,
+  "yaml": "op-plugin-ascend-op-plugin-sst4q.yaml",
+  "labels": {
+   "jobPRID": "5697",
+   "jobRepositoryName": "ascend-op-plugin",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "8798a310e3fb446f913b63b4bfc3a672"
+  }
+ },
+ {
+  "type_key": "df2d20443d870424104a90ce94dc05d5d28c8bf0",
+  "desc": "pr-mindspeed-mm:v26.1.0-cann9.0.0-torch_npu2.7.1.post6-910b-openeuler24.03-py3.11-aarch64-ci | no-ut | no-branch",
+  "ns": "mindspeed-mm",
+  "name": "ascend-mindspeed-mm-q82f8",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787625677.0606725,
+  "yaml": "mindspeed-mm-ascend-mindspeed-mm-q82f8.yaml",
+  "labels": {
+   "jobPRID": "3040",
+   "jobRepositoryName": "ascend-mindspeed-mm",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "133ee5917b1c422caf0217a4b9dd532c"
+  }
+ },
+ {
+  "type_key": "e2b7e8ab41d1a805f1a4717fce57d4a1ad9c7bbc",
+  "desc": "pytorch_2.11.0_a2_aarch64_builder | no-ut | no-branch",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-vlznz",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787194456.4919355,
+  "yaml": "op-plugin-ascend-pytorch-vlznz.yaml",
+  "labels": {
+   "jobPRID": "44912",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "c0b1e373b881469ea0bac7ecd92f1a80"
+  }
+ },
+ {
+  "type_key": "e30feb3c5da64e288a63535f8ac7919f1a4b822c",
+  "desc": "pytorch_2.7.1_a2_aarch64_builder:20260518 | no-ut | master",
+  "ns": "op-plugin",
+  "name": "ascend-op-plugin-96xk4",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787624837.059441,
+  "yaml": "op-plugin-ascend-op-plugin-96xk4.yaml",
+  "labels": {
+   "jobPRID": "5697",
+   "jobRepositoryName": "ascend-op-plugin",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "8798a310e3fb446f913b63b4bfc3a672"
+  }
+ },
+ {
+  "type_key": "e6e1a32763428f635f3e4382ee4ba7f9d9cd9c3e",
+  "desc": "pytorch_2.11.0_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | v2.11.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-bcq57",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787622077.0554214,
+  "yaml": "op-plugin-ascend-pytorch-bcq57.yaml",
+  "labels": {
+   "jobPRID": "41377",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "29dd30dd4a2645f3900eab12b41ea9b2"
+  }
+ },
+ {
+  "type_key": "ee60019a80ab0eccb98d595493365f14d48d0c70",
+  "desc": "pytorch_master_a2_aarch64_builder:20260804 | pytorch_ut_dist.sh | master",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-xwk2n",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787581096.9970415,
+  "yaml": "op-plugin-ascend-pytorch-xwk2n.yaml",
+  "labels": {
+   "jobPRID": "45252",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "058572d164df41988ca33d1883e580eb"
+  }
+ },
+ {
+  "type_key": "f0c5846a1ab04d8e2a128230d18057c718fe3f35",
+  "desc": "pytorch_2.7.1_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | v2.7.1",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-x778b",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787626157.0613632,
+  "yaml": "op-plugin-ascend-pytorch-x778b.yaml",
+  "labels": {
+   "jobPRID": "44420",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "1256ba7de60a4393853bd284311cc79e"
+  }
+ },
+ {
+  "type_key": "f645209f4fa3f8d5d8954454cf4baa7bcba201d7",
+  "desc": "pytorch_2.13.0_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | master",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-mhtxh",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787622737.0562866,
+  "yaml": "op-plugin-ascend-pytorch-mhtxh.yaml",
+  "labels": {
+   "jobPRID": "45237",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "9ca678311f7d4ae09ca28bd6de162610"
+  }
+ },
+ {
+  "type_key": "fe1e619ccbf7b9a43ca0c9057412ba210b025d69",
+  "desc": "pytorch_2.10.0_a2_aarch64_builder:20260804 | pytorch_ut_general.sh | v2.10.0-26.1.0",
+  "ns": "op-plugin",
+  "name": "ascend-pytorch-shjtw",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787575696.989562,
+  "yaml": "op-plugin-ascend-pytorch-shjtw.yaml",
+  "labels": {
+   "jobPRID": "45234",
+   "jobRepositoryName": "ascend-pytorch",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "e565f97174454d94a7ca4d3979a35360"
+  }
+ },
+ {
+  "type_key": "fe2c1abb3b49d60ed024583d1678aad72d3bd55c",
+  "desc": "pytorch_2.9.0_a2_aarch64_builder:20260518 | no-ut | master",
+  "ns": "op-plugin",
+  "name": "ascend-op-plugin-c8jvx",
+  "phases": [
+   "Running",
+   "Completed"
+  ],
+  "terminal": "Completed",
+  "terminal_ts": 1787623757.0576873,
+  "yaml": "op-plugin-ascend-op-plugin-c8jvx.yaml",
+  "labels": {
+   "jobPRID": "5697",
+   "jobRepositoryName": "ascend-op-plugin",
+   "kubernetes.io/arch": "arm64",
+   "pipeline/run-id": "8798a310e3fb446f913b63b4bfc3a672"
+  }
+ },
+ {
+  "type_key": "ff658798aab70ed9f3cd7824bbfc1673642aefca",
+  "desc": "mindstudio-st-msprof:26.1.0-0708-test3 | no-ut | no-branch",
+  "ns": "argo",
+  "name": "job-script-2q7kz",
+  "phases": [
+   "Running",
+   "Aborted"
+  ],
+  "terminal": "Aborted",
+  "terminal_ts": 1787625677.0606725,
+  "yaml": "argo-job-script-2q7kz.yaml",
+  "labels": {
+   "kubernetes.io/arch": "arm64"
+  }
+ }
+]

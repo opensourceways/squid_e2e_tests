@@ -1,13 +1,12 @@
-# 本文件是 **wlcb-001 集群**（乌兰花/乌兰察布-001）的 values 文件
+# 本文件是 **gy-002 集群**（openmerlin-guiyang-002）的 values 文件
 #
 # 部署时使用（ArgoCD 的 $values 源，或 helm -f）：
-#   helm install squid ./chart -f values-wlcb-001.yaml -n squid --kubeconfig ~/.kube/wlcb-001.yaml
+#   helm install squid ./chart -f values-gy-002.yaml -n squid --kubeconfig ~/.kube/gy-002.yaml
 #
-# 调度：nodeAffinity 绑定 192.168.1.191 + 192.168.1.49（amd64）。
-# 192.168.1.49 带 label cache=true（无 taint）；191 无 cache label —— toleration 无副作用。
-# caNamespaces 与线上 4 个命名空间（squid/op-plugin/mindspeed-mm/mindspeed-bridge）同步。
+# 调度：nodeAffinity 绑定唯一 cache 节点 10.0.1.220（amd64，label cache=true，taint cache）
+# 必须带 cache toleration，否则无法调度到该节点。
 #
-# Environment wlcb-001: production-grade resources, dual-active replicas
+# Environment gy-002: production-grade resources, dual-active replicas
 replicas: 2
 
 nodeSelector:
@@ -20,13 +19,17 @@ nodeAffinity:
       - key: kubernetes.io/hostname
         operator: In
         values:
-        - 192.168.1.49
+        - 10.0.1.220
 
 tolerations:
 - key: cache
   operator: Equal
   value: "true"
   effect: NoSchedule
+
+# 从私有 SWR registry 拉镜像所需的 pull secret（squid 命名空间已存在同名 secret）
+imagePullSecrets:
+- name: huawei-swr-image-pull-secret-model-gy
 
 squid:
   maxObjectSize: 8192
@@ -65,10 +68,19 @@ secretDefinition:
   caBundleKey: squid_ca_bundle_v3_prod_pem
   caPublicKey: squid_ca_v3_prod_pem
   caTruststoreKey: squid_bazel_trust_v3_prod_jks
+  # CA 同步到运行 VCJob 的命名空间（gy-002 实测：argo/drivingsdk/fsdpturbo/megatronadaptor/
+  # memcache/memfabric-hybrid/mindspeed*/mindspeed-bridge 等），
+  # 这样注入代理时 squid-ca-cert 才能挂载进 CI 容器，否则 wget/curl 类工具会因不信任
+  # squid CA 而失败（C 类问题）。
   caNamespaces:
   - squid
-  - op-plugin
-  - mindspeed-mm
-  - mindspeed-bridge
   - argo
-  - ascend-data-sync
+  - drivingsdk
+  - fsdpturbo
+  - megatronadaptor
+  - memcache
+  - memfabric-hybrid
+  - mindspeed
+  - mindspeed-bridge
+  - mindspeed-llm
+  - mindspeed-mm

@@ -1,0 +1,405 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  annotations:
+  generateName: ascend-pytorch-
+  labels:
+    huawei.com/ascend-1980: "2"
+    huawei.com/npu: "true"
+    jobPRID: "45252"
+    jobRepositoryName: ascend-pytorch
+    karmada.io/managed: "true"
+    kubernetes.io/arch: arm64
+    pipeline/run-id: 058572d164df41988ca33d1883e580eb
+  name: ascend-pytorch-v72c6
+  namespace: op-plugin
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  policies:
+  - action: AbortJob
+    event: PodFailed
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  - maxRetry: 1
+    minAvailable: 1
+    name: main-script
+    replicas: 1
+    template:
+      metadata:
+        annotations:
+          kubernetes.io/ingress-bandwidth: 150M
+      spec:
+        activeDeadlineSeconds: 14400
+        containers:
+        - args:
+          - "git config --global url.\"http://git-cache-http-server.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://gitcode.com\" || echo \"WARNING: git config failed for gitcode\"\ngit
+            config --global url.\"http://git-cache-github.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://gh-proxy.test.osinfra.cn/https://github.com\" || echo \"WARNING:
+            git config failed for github\"\ngit config --global url.\"http://git-cache-github.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://github.com\" || echo \"WARNING: git config failed for github\"\ngit
+            config --global url.\"http://git-cache-gitee.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://gitee.com\" || echo \"WARNING: git config failed for gitee\"\ngit
+            config --global url.\"http://git-cache-atomgit.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://atomgit.com\" || echo \"WARNING: git config failed for atomgit\"\ngit
+            config --global url.\"http://git-cache-codehub.git-cache.svc.cluster.local:8080\".insteadOf
+            \"https://codehub.devcloud.cn-north-4.huaweicloud.com\" || echo \"WARNING:
+            git config failed for codehub\"\n\n(trap 'EXIT_CODE=$?; [ \"$EXIT_CODE\"
+            -ne 0 ] && sleep 10' EXIT\n{\n    set +e\n    echo \"===== System Info
+            =====\"\n    echo \"===== OS =====\"\n    uname -a\n    human_bytes()
+            {\n        local bytes=$1\n        case \"$bytes\" in\n            max|-1)
+            echo \"unlimited\"; return ;;\n        esac\n        if [ \"${bytes#-}\"
+            != \"$bytes\" ]; then\n            echo \"unlimited\"\n            return\n
+            \       fi\n        if [ \"$bytes\" -ge 1073741824 ]; then\n            echo
+            \"$((bytes / 1073741824))GiB\"\n        elif [ \"$bytes\" -ge 1048576
+            ]; then\n            echo \"$((bytes / 1048576))MiB\"\n        elif [
+            \"$bytes\" -ge 1024 ]; then\n            echo \"$((bytes / 1024))KiB\"\n
+            \       else\n            echo \"${bytes}B\"\n        fi\n    }\n    echo
+            \"===== CPU =====\"\n    req_cores=\"\"\n    if [ -r /sys/fs/cgroup/cpu.weight
+            ]; then\n        weight=$(cat /sys/fs/cgroup/cpu.weight)\n        if [
+            -n \"$weight\" ] && [ \"$weight\" -gt 1 ] 2>/dev/null; then\n            req_cores=$((
+            ( ( (weight - 1) * 262142 / 9999 + 2 ) * 1000 / 1024 + 500 ) / 1000 ))\n
+            \       fi\n    elif [ -r /sys/fs/cgroup/cpu/cpu.shares ]; then\n        shares=$(cat
+            /sys/fs/cgroup/cpu/cpu.shares)\n        if [ -n \"$shares\" ] && [ \"$shares\"
+            -gt 2 ] 2>/dev/null; then\n            req_cores=$(( ( shares * 1000 /
+            1024 + 500 ) / 1000 ))\n        fi\n    fi\n    if [ -n \"$req_cores\"
+            ]; then\n        echo \"CPU request: ${req_cores} cores\"\n    fi\n    if
+            [ -r /sys/fs/cgroup/cpu.max ]; then\n        read -r quota period < /sys/fs/cgroup/cpu.max\n
+            \       if [ \"$quota\" != \"max\" ] && [ -n \"$period\" ] && [ \"$period\"
+            != \"0\" ]; then\n            echo \"CPU limit: $((quota / period)) cores\"\n
+            \       fi\n    elif [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ] && [ -r
+            /sys/fs/cgroup/cpu/cpu.cfs_period_us ]; then\n        quota=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us)\n
+            \       period=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)\n        if
+            [ \"$quota\" != \"-1\" ] && [ -n \"$period\" ] && [ \"$period\" != \"0\"
+            ]; then\n            echo \"CPU limit: $((quota / period)) cores\"\n        fi\n
+            \   fi\n    if [ -r /sys/fs/cgroup/cpu.stat ]; then\n        t1=$(grep
+            '^usage_usec ' /sys/fs/cgroup/cpu.stat | cut -d ' ' -f2)\n        sleep
+            1\n        t2=$(grep '^usage_usec ' /sys/fs/cgroup/cpu.stat | cut -d '
+            ' -f2)\n        if [ -n \"$t1\" ] && [ -n \"$t2\" ] && [ \"$t2\" -ge \"$t1\"
+            ] 2>/dev/null; then\n            echo \"CPU usage: $(awk -v d=\"$((t2
+            - t1))\" 'BEGIN { printf \"%.2f cores\", d / 1000000 }')\"\n        fi\n
+            \   elif [ -r /sys/fs/cgroup/cpuacct/cpuacct.usage ]; then\n        n1=$(cat
+            /sys/fs/cgroup/cpuacct/cpuacct.usage)\n        sleep 1\n        n2=$(cat
+            /sys/fs/cgroup/cpuacct/cpuacct.usage)\n        if [ -n \"$n1\" ] && [
+            -n \"$n2\" ] && [ \"$n2\" -ge \"$n1\" ] 2>/dev/null; then\n            echo
+            \"CPU usage: $(awk -v d=\"$((n2 - n1))\" 'BEGIN { printf \"%.2f cores\",
+            d / 1000000000 }')\"\n        fi\n    fi\n    echo \"===== Memory =====\"\n
+            \   if [ -r /sys/fs/cgroup/memory.max ]; then\n        echo \"Memory limit:
+            $(human_bytes \"$(cat /sys/fs/cgroup/memory.max)\")\"\n        if [ -r
+            /sys/fs/cgroup/memory.current ]; then\n            echo \"Memory usage:
+            $(human_bytes \"$(cat /sys/fs/cgroup/memory.current)\")\"\n        fi\n
+            \   elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then\n        echo
+            \"Memory limit: $(human_bytes \"$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)\")\"\n
+            \       if [ -r /sys/fs/cgroup/memory/memory.usage_in_bytes ]; then\n
+            \           echo \"Memory usage: $(human_bytes \"$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes)\")\"\n
+            \       fi\n    else\n        free -h\n    fi\n    echo \"===== NPU =====\"\n
+            \   if command -v npu-smi >/dev/null 2>&1; then\n        npu-smi info\n
+            \   else\n        echo \"npu-smi not available\"\n    fi\n} 2>/dev/null
+            || true\nif [ -n \"https://gitcode.com/Ascend/pytorch.git\" ]; then\n
+            \   CLONE_OK=true\n    git clone --single-branch -b \"master\" \"https://gitcode.com/Ascend/pytorch.git\"
+            \"$WORKSPACE\" || {\n        mkdir \"$WORKSPACE\" || echo \"WARNING: directory
+            exists\"\n        echo \"WARNING: 主项目拉取失败！\"\n        CLONE_OK=false\n
+            \   }\n    cd \"$WORKSPACE\"\n    if [ \"$CLONE_OK\" = \"true\" ]; then\n
+            \       git fetch origin +refs/merge-requests/45252/head:pr\n        git
+            config --global user.name \"robot\"\n        git config --global user.email
+            \"your@emaple.com\"\n        git merge pr --no-ff -m \"Merge master from
+            refs/merge-requests/45252/head\" || {\n            echo \"WARNING: 主项目merge失败！\"\n
+            \       }\n    fi\nfi\ncat > .bazelrc << 'EOF'\n# Use GitHub BCR source
+            as the registry\ncommon --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/\nEOF\nset
+            -ex\n# 工作目录清空\nrm -rf *\n# 下载CI仓代码\ngit clone -b master https://codehub.devcloud.cn-north-4.huaweicloud.com/a9b188a62f334fc0963bcfb523426d17/ci_gitcode.git
+            cie\n# 执行UT\nbash cie/common/common/merge.sh master https://gitcode.com/Ascend/pytorch.git
+            45252 /workspace\ncd /workspace/CODE\ngit diff-tree -r --name-only --no-commit-id
+            origin/master HEAD > ../modify_files.txt\ncat ../modify_files.txt \ncd
+            /workspace\nbash cie/common/UT/pytorch_ut_dist.sh master 3.10 45252 /workspace
+            3 4 2.13.0\n\ncd ${WORKSPACE}\ncp -r --parents CODE/time_data.json /output/\n);
+            _ec=$?; echo $_ec > /output/.ascend-done; exit $_ec"
+          command:
+          - bash
+          - -c
+          env:
+          - name: WORKSPACE
+            value: /workspace
+          - name: workspace
+            value: /workspace
+          - name: GOPROXY
+            value: http://cache-service.nginx-pypi-cache.svc.cluster.local:8084|https://goproxy.cn|direct
+          - name: GOSUMDB
+            value: sum.golang.google.cn
+          - name: CODEARTS_BUILD_META
+            value: ${WORKSPACE}/.ci_build_meta
+          - name: TRIGGER_TYPE
+            value: Generic
+          - name: TIMESTAMP
+            value: "20260824221602"
+          - name: INCREASENUM
+            value: "184"
+          - name: CLOUD_BUILD_DOMAIN_ID
+            value: 0d336831568090260fd5c01450729240
+          - name: codeBranch
+            value: master
+          - name: onetrack_torch
+            value: 2.13.0
+          - name: CLOUD_BUILD_BUILD_YAML_PATH
+            value: .cloudbuild/build.yml
+          - name: EXECUTOR
+            value: hwstaff_jsz_gjl/pipeline_admin_trust
+          - name: BUILDNUMBER
+            value: "20260824.36"
+          - name: COMMIT_ID_SHORTER
+            value: 25321dd2
+          - name: GIT_LOCAL_BRANCH
+            value: task/130-gradbucket-parameters-master-code
+          - name: CLOUD_BUILD_ENV
+            value: prod
+          - name: jobName
+            value: j_K5OXxhFp
+          - name: MAX_JOBS
+            value: "46"
+          - name: JOB_ID
+            value: fa71d8d5298e4cc6b12774bedf0fb976
+          - name: GIT_COMMIT
+            value: 25321dd2a5c26d02f8027bbfc3f2ac139762cb1d
+          - name: CMAKE_BUILD_PARALLEL_LEVEL
+            value: "46"
+          - name: access
+            value: 493ee746ab15f2d584500c7d7d0c138a
+          - name: jobType
+            value: codeci
+          - name: REPOSITORY_NAME
+            value: "1"
+          - name: image
+            value: swr.cn-north-4.myhuaweicloud.com/octopus_jnlp/dockerjnlp:4.2.1
+          - name: COMMIT_ID
+            value: 25321dd2a5c26d02f8027bbfc3f2ac139762cb1d
+          - name: LC_ALL
+            value: en_US.utf8
+          - name: BASH_ENV
+            value: /usr/local/bin/signal_forward.sh
+          - name: CLOUD_BUILD_TRIGGER_TYPE
+            value: MANUAL
+          - name: CLOUD_BUILD_SERVER_URL
+            value: https://cloudbuild-backend.cn-north-4.myhuaweicloud.com:8443/
+          - name: CLOUD_BUILD_TIMESTAMP
+            value: "1787580962798"
+          - name: LANGUAGE
+            value: en_US.utf8
+          - name: repoUrl
+            value: https://gitcode.com/gcw_5iv7qIRF/pytorch.git
+          - name: CLOUD_BUILD_BUILD_TYPE
+            value: JOB
+          - name: CLOUD_BUILD_PROJECT_NAME
+            value: UT_pytorch_dist_general_onetrack_torch
+          - name: CLOUD_BUILD_PROJECT_API_URL
+            value: https://cloudbuild-backend.cn-north-4.myhuaweicloud.com:8443/build-project-api
+          - name: jobId
+            value: K5OXxhFp
+          - name: JENKINS_SERVER_COOKIE
+            value: durable-3b86520612974bda17c3bd560ea5eeb7
+          - name: pr_id
+            value: "45252"
+          - name: CLOUD_BUILD_REPO_URL
+            value: https://gitcode.com/gcw_5iv7qIRF/pytorch.git
+          - name: ___workspace___
+            value: /workspace
+          - name: __repository__
+            value: '{"repo_name":"pytorch","url":"https://gitcode.com/Ascend/pytorch.git"}'
+          - name: CLOUD_BUILD_TRIGGER_USER_ID
+            value: 538b80346627462c9a39b8d3c65612a6
+          - name: HOSTNAME
+            value: ae1c5425fc64
+          - name: BUILD_DISPLAY_NAME
+            value: '#1'
+          - name: CLOUD_BUILD_ENV_REGION
+            value: kunpeng
+          - name: BUILD_ID
+            value: "1"
+          - name: slaveType
+            value: k8sdockerondocker
+          - name: CLOUD_BUILD_RECORD_ID
+            value: fa2658c3-b4e2-4637-9f52-11b4f2769228
+          - name: namespace
+            value: argo
+          - name: CLOUD_BUILD_DOMAIN_TAG
+            value: hwstaff_jsz_gjl
+          - name: TEST_RANK
+            value: "3"
+          - name: CLOUD_BUILD_CONTEXT_PATH
+            value: /build-project-api
+          - name: CLOUD_BUILD_LANGUAGE
+            value: zh-cn
+          - name: py_version
+            value: "3.10"
+          - name: SOURCE_NAME
+            value: pytorch
+          - name: CLOUD_BUILD_DOMAIN_NAME
+            value: hwstaff_jsz_gjl
+          - name: CODEARTS_OUTPUT
+            value: ${WORKSPACE}/.ci_user_output
+          - name: WORKSPACE_TMP
+            value: /devcloud/slavespace/slave1-new/workspace/j_K5OXxhFp@tmp
+          - name: PROJECT_ID
+            value: a9b188a62f334fc0963bcfb523426d17
+          - name: CLOUD_BUILD_TRIGGER_USER
+            value: hwstaff_jsz_gjl/pipeline_admin_trust
+          - name: CLOUD_BUILD_JOB_DISPLAY_NAME
+            value: UT_pytorch_dist_general_onetrack_torch
+          - name: BUILD_NUMBER
+            value: "1"
+          - name: REMOTE_URL
+            value: https://gitcode.com/Ascend/pytorch.git
+          - name: EXECUTOR_NUMBER
+            value: "0"
+          - name: CLOUD_BUILD_ANALYSIS_URL
+            value: https://172.22.1.78:7533/buildcheckanalysis
+          - name: ___JOB_NAME___
+            value: UT_pytorch_dist_general_onetrack_torch
+          - name: CLOUD_BUILD_ENV_INFO
+            value: devcloud:prod
+          - name: JOB_NAME
+            value: j_K5OXxhFp
+          - name: JOB_BASE_NAME
+            value: j_K5OXxhFp
+          - name: TARGET_BRANCH
+            value: master
+          - name: Preference
+            value: '[]'
+          - name: TEST_WORLD_SIZE
+            value: "4"
+          - name: CI
+            value: "false"
+          - name: pipelineRunId
+            value: 058572d164df41988ca33d1883e580eb
+          - name: STAGE_NAME
+            value: stage5
+          - name: GIT_BRANCH
+            value: origin/master
+          - name: CLOUD_BUILD_PROJECT_ID
+            value: 60e5c23c-6d79-4cf9-93d7-bfc90f31b1cf
+          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.13.0_a2_aarch64_builder:20260804
+          name: ascend
+          resources:
+            limits:
+              huawei.com/ascend-1980: "2"
+              memory: 160Gi
+            requests:
+              cpu: "46"
+              huawei.com/ascend-1980: "2"
+              memory: 160Gi
+          volumeMounts:
+          - mountPath: /usr/local/Ascend/driver
+            name: ascend-driver
+            readOnly: true
+          - mountPath: /dev/shm
+            name: shm
+          - mountPath: /output
+            name: output
+          workingDir: /workspace
+        - args:
+          - -c
+          - |-
+            trap 'echo "Received TERM, exiting."; exit 0' TERM
+            while true; do
+              if [ -f "$DONE_FILE" ]; then
+                _ascend_exit=$(cat "$DONE_FILE" 2>/dev/null || echo "1")
+                echo "ascend container finished (exit $_ascend_exit)."
+                if [ "$_ascend_exit" != "0" ]; then
+                  echo "ascend failed, exiting sidecar."
+                  exit 0
+                fi
+              fi
+              sleep 1
+            done
+          command:
+          - sh
+          env:
+          - name: DONE_FILE
+            value: /output/.ascend-done
+          - name: WORKSPACE
+            value: /workspace
+          image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine:3.23.3
+          name: copy-artifact
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 200Mi
+          volumeMounts:
+          - mountPath: /output
+            name: output
+        - args:
+          - -c
+          - |-
+            trap 'echo "Received TERM, exiting."; exit 0' TERM
+            HEARTBEAT_FILE="$HEARTBEAT_FILE_PATH"
+            TIMEOUT_SEC=$HEARTBEAT_TIMEOUT_SEC
+            touch "$HEARTBEAT_FILE"
+            MY_CGROUP=$(awk -F/ '{print $NF}' /proc/self/cgroup | head -1)
+            COUNT=0
+            while true; do
+              LAST=$(stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null || stat -f %m "$HEARTBEAT_FILE")
+              NOW=$(date +%s)
+              ELAPSED=$((NOW - LAST))
+              if [ "$ELAPSED" -ge "$TIMEOUT_SEC" ]; then
+                echo "Heartbeat timeout (${TIMEOUT_SEC}s). Killing all pod processes."
+                for attempt in 1 2 3 4 5; do
+                  for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+                    if [ "$pid" = "1" ]; then
+                      continue
+                    fi
+                    CG=$(awk -F/ '{print $NF}' /proc/$pid/cgroup 2>/dev/null | head -1)
+                    if [ "$CG" != "$MY_CGROUP" ]; then
+                      kill -9 "$pid" 2>/dev/null || true
+                    fi
+                  done
+                  sleep 2
+                done
+                echo "Killing PID 1."
+                kill -9 1 2>/dev/null || true
+                exit 1
+              fi
+              COUNT=$((COUNT + 1))
+              if [ $((COUNT % 5)) -eq 0 ]; then
+                REMAINING=$((TIMEOUT_SEC - ELAPSED))
+                echo "Heartbeat remaining: ${REMAINING}s"
+              fi
+              sleep 1
+            done
+          command:
+          - sh
+          env:
+          - name: HEARTBEAT_FILE_PATH
+            value: /tmp/heartbeat
+          - name: HEARTBEAT_TIMEOUT_SEC
+            value: "600"
+          image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine:3.23.3
+          name: heartbeat
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 200Mi
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        shareProcessNamespace: true
+        volumes:
+        - hostPath:
+            path: /usr/local/Ascend/driver
+          name: ascend-driver
+        - emptyDir:
+            medium: Memory
+            sizeLimit: 128Mi
+          name: shm
+        - emptyDir:
+            sizeLimit: 10Gi
+          name: output

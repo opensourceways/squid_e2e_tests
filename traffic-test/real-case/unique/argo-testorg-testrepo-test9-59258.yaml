@@ -1,0 +1,64 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: testorg-testrepo-test9-
+  labels:
+    jobPRID: "100"
+    jobRepositoryName: testorg-testrepo-test9
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-910b4-123
+  name: testorg-testrepo-test9-59258
+  namespace: argo
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  policies:
+  - action: AbortJob
+    event: PodFailed
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  - maxRetry: 1
+    minAvailable: 1
+    name: main-script
+    replicas: 1
+    template:
+      metadata: {}
+      spec:
+        activeDeadlineSeconds: 14400
+        containers:
+        - args:
+          - exit 1
+          command:
+          - sh
+          - -c
+          image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine:3.23.3
+          name: alpine
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: "1"
+              memory: 1Gi
+        - args:
+          - "100"
+          command:
+          - sleep
+          image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine:3.23.3
+          name: sleep
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: "1"
+              memory: 1Gi
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+  ttlSecondsAfterFinished: 1800

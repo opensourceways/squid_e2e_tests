@@ -10,3 +10,16 @@ buildkit/src/
 .metrics-k8s-baseline
 traffic-test/logs
 traffic-test/traffic-gen
+traffic-test/real-case/__pycache__
+traffic-test/real-case/done
+traffic-test/real-case/yaml
+traffic-test/real-case/queue4.log
+traffic-test/real-case/rerun_4cases.log
+traffic-test/real-case/queue3.err
+traffic-test/real-case/queue3.log
+traffic-test/real-case/queue2.log
+traffic-test/real-case/queue1.log
+traffic-test/real-case/queue3-monitor.log
+queue2.log
+queue3.log
+queue4.log

@@ -251,9 +251,11 @@ lifecycle:
 
 ### 2.5 Bazel 专项（JVM trust store）
 
-Bazel 启动 JVM 时**忽略 `JAVA_TOOL_OPTIONS`**，trust 参数只能通过 `.bazelrc`。
+Bazel 启动 JVM 时**忽略 `JAVA_TOOL_OPTIONS`**，trust 参数只能通过 bazelrc 传入。
+且必须写到**全局 `/etc/bazel.bazelrc`**（bazel 无论 cwd/workspace 都会读这个系统级 rc），
+**不要写 `$WORKSPACE/.bazelrc`**——那是 workspace-local rc，仅当以该 workspace 为 cwd 时才被读。
 JKS 经 Vault 同步后是 **base64 文本**（Vault 只存字符串，二进制自动 base64），
-postStart 需先解码再写 `.bazelrc`：
+postStart 需先解码再写 `/etc/bazel.bazelrc`：
 
 ```yaml
 # postStart 中：
@@ -270,10 +272,11 @@ if [ -f "$S" ]; then
     echo "JKS used as-is -> $J"
   fi
 fi
-cat > "$WORKSPACE/.bazelrc" << 'EOF'
+cat > /etc/bazel.bazelrc << 'EOF'
 startup --host_jvm_args=-Djavax.net.ssl.trustStore=/etc/squid-bazel-trust/squid-bazel-trust.jks
 startup --host_jvm_args=-Djavax.net.ssl.trustStorePassword=changeit
 EOF
+chmod 644 /etc/bazel.bazelrc 2>/dev/null
 ```
 
 - JKS 由 Vault 经 `squid-ca-cert` secret 分发（`key: squid-bazel-trust.jks`），生成方式：

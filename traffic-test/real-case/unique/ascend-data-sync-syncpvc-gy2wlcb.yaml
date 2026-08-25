@@ -1,0 +1,211 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  annotations:
+      {"apiVersion":"batch.volcano.sh/v1alpha1","kind":"Job","metadata":{"annotations":{},"name":"syncpvc-gy2wlcb","namespace":"ascend-data-sync"},"spec":{"minAvailable":1,"policies":[{"action":"AbortJob","event":"PodFailed"}],"schedulerName":"volcano","tasks":[{"maxRetry":1,"name":"sync","replicas":1,"template":{"spec":{"affinity":{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"kubernetes.io/hostname","operator":"In","values":["192.168.1.49"]}]}]}}},"containers":[{"args":["set -u\n# Shared distributed lock helpers (from ConfigMap syncpvc-sync-lock).\n# LOCK_NAME is a global variable we override per folder.\n. /opt/sync-lock/sync-lock.sh\n\n# HOME must be writable for rclone's cache (~/.cache) — rootFS is\n# readOnly, so point it at the emptyDir /tmp.\nexport HOME=/tmp\n# sftpB connects to the LOCAL server via ClusterIP \"sftp-svc\", but the\n# secret's known_hosts holds the EIP host key ([116.204.45.91]:2222).\n# Rewrite that entry to [sftp-svc]:2222 so the host key still pins the\n# server (same host key on both clusters).\nawk '/^\\[116\\.204\\.45\\.91\\]:2222/ { gsub(\"\\\\[116.204.45.91\\\\]:2222\", \"[sftp-svc]:2222\"); print }' \\\n  /etc/sftp/known_hosts \u003e /tmp/known_hosts_sftpb\n\n# rclone sync is one-way mirror; --max-delete default cap stays (an\n# over-zealous delete can't wipe a whole folder in one run).\nFLAGS=\"--sftp-set-modtime=true --stats 30s --stats-one-line --contimeout 20s --low-level-retries 2\"\necho \"EIP_A=$EIP_A SFTP_B_HOST=$SFTP_B_HOST (local ClusterIP)\"\necho \"SYNC_FOLDERS=$SYNC_FOLDERS\"\necho \"EXCLUDE_FOLDERS=$EXCLUDE_FOLDERS\"\n\n# Folders never synced (one-way mirror would delete wlcb unique data).\n# Build a \",,,\"-delimited lowercase list; a later `case` glob matches\n# whole tokens only (avoids substring false-positives like\n# \"mindspeed-llm\" matching \"mindspeed\").\nexclude=\",\"\nIFS=,\nfor ex in $EXCLUDE_FOLDERS; do\n  ex=$(echo \"$ex\" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | tr 'A-Z' 'a-z')\n  [ -z \"$ex\" ] \u0026\u0026 continue\n  exclude=\"$exclude$ex,\"\ndone\n\nrc=0\nIFS=,\nfor folder in $SYNC_FOLDERS; do\n  [ -z \"$folder\" ] \u0026\u0026 continue\n  # Trim surrounding whitespace so \"a, b\" and \"a,b\" behave the same.\n  folder=$(echo \"$folder\" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')\n  [ -z \"$folder\" ] \u0026\u0026 continue\n\n  # Hard-skip excluded folders (case-insensitive whole-token match).\n  lc=$(echo \"$folder\" | tr 'A-Z' 'a-z')\n  case \"$exclude\" in\n    *\",$lc,\"*)\n      echo \"=== SKIP $folder (excluded: wlcb holds unique data) ===\"\n      continue\n      ;;\n  esac\n\n  # Per-folder lock on the shared /lock dir (bisync-state PVC,\n  # subPath sync-lock). Different folders -\u003e different lock names -\u003e\n  # concurrent; same folder -\u003e serialized. Independent of the\n  # bisync/cleanup \"sync.lock\".\n  LOCK_NAME=\"$folder.lock\"\n  echo \"=== sync $folder (lock: $LOCK_NAME) ===\"\n  acquire_lock || { echo \"acquire_lock failed for $folder\"; rc=1; continue; }\n  rclone sync \\\n    \"sftpA:/$folder\" \\\n    \"sftpB:/$folder\" \\\n    $FLAGS\n  folder_rc=$?\n  release_lock\n  echo \"folder rc=$folder_rc\"\n  [ \"$folder_rc\" -ne 0 ] \u0026\u0026 rc=$folder_rc\ndone\necho \"sync rc=$rc\"\nexit $rc\n"],"command":["/bin/sh","-c"],"env":[{"name":"SFTP_USER","valueFrom":{"secretKeyRef":{"key":"user","name":"syncpvc-sftp"}}},{"name":"EIP_A","valueFrom":{"secretKeyRef":{"key":"eip-a","name":"syncpvc-sftp"}}},{"name":"SYNC_FOLDERS","value":"FSDPTurbo,MegatronAdaptor,drivingSDK,indexsdk,mindspeed,mindspeed-ops,mindstudio,multimodalsdk,ragsdk,recsdk,slime-ascend"},{"name":"EXCLUDE_FOLDERS","value":"mindspeed-llm,mindspeed-mm,slime_ascend"},{"name":"SFTP_B_HOST","value":"sftp-svc"},{"name":"RCLONE_CONFIG","value":"/dev/null"},{"name":"RCLONE_CACHE_DIR","value":"/tmp"},{"name":"RCLONE_CONFIG_SFTPA_TYPE","value":"sftp"},{"name":"RCLONE_CONFIG_SFTPA_HOST","valueFrom":{"secretKeyRef":{"key":"eip-a","name":"syncpvc-sftp"}}},{"name":"RCLONE_CONFIG_SFTPA_USER","valueFrom":{"secretKeyRef":{"key":"user","name":"syncpvc-sftp"}}},{"name":"RCLONE_CONFIG_SFTPA_PORT","value":"2222"},{"name":"RCLONE_CONFIG_SFTPA_KEY_FILE","value":"/etc/sftp/id_ed25519"},{"name":"RCLONE_CONFIG_SFTPA_KNOWN_HOSTS_FILE","value":"/etc/sftp/known_hosts"},{"name":"RCLONE_CONFIG_SFTPB_TYPE","value":"sftp"},{"name":"RCLONE_CONFIG_SFTPB_HOST","value":"sftp-svc"},{"name":"RCLONE_CONFIG_SFTPB_USER","valueFrom":{"secretKeyRef":{"key":"user","name":"syncpvc-sftp"}}},{"name":"RCLONE_CONFIG_SFTPB_PORT","value":"2222"},{"name":"RCLONE_CONFIG_SFTPB_KEY_FILE","value":"/etc/sftp/id_ed25519"},{"name":"RCLONE_CONFIG_SFTPB_KNOWN_HOSTS_FILE","value":"/tmp/known_hosts_sftpb"}],"image":"swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/rclone/rclone:sha-adc7f2e","imagePullPolicy":"IfNotPresent","name":"sync","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsNonRoot":true,"runAsUser":1000},"volumeMounts":[{"mountPath":"/etc/sftp","name":"keys","readOnly":true},{"mountPath":"/opt/sync-lock","name":"lock","readOnly":true},{"mountPath":"/tmp","name":"tmp"},{"mountPath":"/lock","name":"state","subPath":"sync-lock"}]}],"restartPolicy":"Never","securityContext":{"fsGroup":1000},"tolerations":[{"effect":"NoSchedule","key":"cache","operator":"Exists"}],"volumes":[{"name":"keys","secret":{"items":[{"key":"ssh-privatekey","mode":416,"path":"id_ed25519"},{"key":"known_hosts","mode":420,"path":"known_hosts"}],"secretName":"syncpvc-sftp"}},{"configMap":{"name":"syncpvc-sync-lock"},"name":"lock"},{"emptyDir":{},"name":"tmp"},{"name":"state","persistentVolumeClaim":{"claimName":"bisync-state"}}]}}}]}}
+  name: syncpvc-gy2wlcb
+  namespace: ascend-data-sync
+spec:
+  maxRetry: 3
+  minAvailable: 1
+  policies:
+  - action: AbortJob
+    event: PodFailed
+  queue: default
+  schedulerName: volcano
+  tasks:
+  - maxRetry: 1
+    minAvailable: 1
+    name: sync
+    replicas: 1
+    template:
+      metadata: {}
+      spec:
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values:
+                  - 192.168.1.49
+        containers:
+        - args:
+          - |
+            set -u
+            # Shared distributed lock helpers (from ConfigMap syncpvc-sync-lock).
+            # LOCK_NAME is a global variable we override per folder.
+            . /opt/sync-lock/sync-lock.sh
+
+            # HOME must be writable for rclone's cache (~/.cache) — rootFS is
+            # readOnly, so point it at the emptyDir /tmp.
+            export HOME=/tmp
+            # sftpB connects to the LOCAL server via ClusterIP "sftp-svc", but the
+            # secret's known_hosts holds the EIP host key ([116.204.45.91]:2222).
+            # Rewrite that entry to [sftp-svc]:2222 so the host key still pins the
+            # server (same host key on both clusters).
+            awk '/^\[116\.204\.45\.91\]:2222/ { gsub("\\[116.204.45.91\\]:2222", "[sftp-svc]:2222"); print }' \
+              /etc/sftp/known_hosts > /tmp/known_hosts_sftpb
+
+            # rclone sync is one-way mirror; --max-delete default cap stays (an
+            # over-zealous delete can't wipe a whole folder in one run).
+            FLAGS="--sftp-set-modtime=true --stats 30s --stats-one-line --contimeout 20s --low-level-retries 2"
+            echo "EIP_A=$EIP_A SFTP_B_HOST=$SFTP_B_HOST (local ClusterIP)"
+            echo "SYNC_FOLDERS=$SYNC_FOLDERS"
+            echo "EXCLUDE_FOLDERS=$EXCLUDE_FOLDERS"
+
+            # Folders never synced (one-way mirror would delete wlcb unique data).
+            # Build a ",,,"-delimited lowercase list; a later `case` glob matches
+            # whole tokens only (avoids substring false-positives like
+            # "mindspeed-llm" matching "mindspeed").
+            exclude=","
+            IFS=,
+            for ex in $EXCLUDE_FOLDERS; do
+              ex=$(echo "$ex" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | tr 'A-Z' 'a-z')
+              [ -z "$ex" ] && continue
+              exclude="$exclude$ex,"
+            done
+
+            rc=0
+            IFS=,
+            for folder in $SYNC_FOLDERS; do
+              [ -z "$folder" ] && continue
+              # Trim surrounding whitespace so "a, b" and "a,b" behave the same.
+              folder=$(echo "$folder" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+              [ -z "$folder" ] && continue
+
+              # Hard-skip excluded folders (case-insensitive whole-token match).
+              lc=$(echo "$folder" | tr 'A-Z' 'a-z')
+              case "$exclude" in
+                *",$lc,"*)
+                  echo "=== SKIP $folder (excluded: wlcb holds unique data) ==="
+                  continue
+                  ;;
+              esac
+
+              # Per-folder lock on the shared /lock dir (bisync-state PVC,
+              # subPath sync-lock). Different folders -> different lock names ->
+              # concurrent; same folder -> serialized. Independent of the
+              # bisync/cleanup "sync.lock".
+              LOCK_NAME="$folder.lock"
+              echo "=== sync $folder (lock: $LOCK_NAME) ==="
+              acquire_lock || { echo "acquire_lock failed for $folder"; rc=1; continue; }
+              rclone sync \
+                "sftpA:/$folder" \
+                "sftpB:/$folder" \
+                $FLAGS
+              folder_rc=$?
+              release_lock
+              echo "folder rc=$folder_rc"
+              [ "$folder_rc" -ne 0 ] && rc=$folder_rc
+            done
+            echo "sync rc=$rc"
+            exit $rc
+          command:
+          - /bin/sh
+          - -c
+          env:
+          - name: SFTP_USER
+            valueFrom:
+              secretKeyRef:
+                key: user
+                name: syncpvc-sftp
+          - name: EIP_A
+            valueFrom:
+              secretKeyRef:
+                key: eip-a
+                name: syncpvc-sftp
+          - name: SYNC_FOLDERS
+            value: FSDPTurbo,MegatronAdaptor,drivingSDK,indexsdk,mindspeed,mindspeed-ops,mindstudio,multimodalsdk,ragsdk,recsdk,slime-ascend
+          - name: EXCLUDE_FOLDERS
+            value: mindspeed-llm,mindspeed-mm,slime_ascend
+          - name: SFTP_B_HOST
+            value: sftp-svc
+          - name: RCLONE_CONFIG
+            value: /dev/null
+          - name: RCLONE_CACHE_DIR
+            value: /tmp
+          - name: RCLONE_CONFIG_SFTPA_TYPE
+            value: sftp
+          - name: RCLONE_CONFIG_SFTPA_HOST
+            valueFrom:
+              secretKeyRef:
+                key: eip-a
+                name: syncpvc-sftp
+          - name: RCLONE_CONFIG_SFTPA_USER
+            valueFrom:
+              secretKeyRef:
+                key: user
+                name: syncpvc-sftp
+          - name: RCLONE_CONFIG_SFTPA_PORT
+            value: "2222"
+          - name: RCLONE_CONFIG_SFTPA_KEY_FILE
+            value: /etc/sftp/id_ed25519
+          - name: RCLONE_CONFIG_SFTPA_KNOWN_HOSTS_FILE
+            value: /etc/sftp/known_hosts
+          - name: RCLONE_CONFIG_SFTPB_TYPE
+            value: sftp
+          - name: RCLONE_CONFIG_SFTPB_HOST
+            value: sftp-svc
+          - name: RCLONE_CONFIG_SFTPB_USER
+            valueFrom:
+              secretKeyRef:
+                key: user
+                name: syncpvc-sftp
+          - name: RCLONE_CONFIG_SFTPB_PORT
+            value: "2222"
+          - name: RCLONE_CONFIG_SFTPB_KEY_FILE
+            value: /etc/sftp/id_ed25519
+          - name: RCLONE_CONFIG_SFTPB_KNOWN_HOSTS_FILE
+            value: /tmp/known_hosts_sftpb
+          image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/rclone/rclone:sha-adc7f2e
+          imagePullPolicy: IfNotPresent
+          name: sync
+          resources: {}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+          volumeMounts:
+          - mountPath: /etc/sftp
+            name: keys
+            readOnly: true
+          - mountPath: /opt/sync-lock
+            name: lock
+            readOnly: true
+          - mountPath: /tmp
+            name: tmp
+          - mountPath: /lock
+            name: state
+            subPath: sync-lock
+        restartPolicy: Never
+        securityContext:
+          fsGroup: 1000
+        tolerations:
+        - effect: NoSchedule
+          key: cache
+          operator: Exists
+        volumes:
+        - name: keys
+          secret:
+            items:
+            - key: ssh-privatekey
+              mode: 416
+              path: id_ed25519
+            - key: known_hosts
+              mode: 420
+              path: known_hosts
+            secretName: syncpvc-sftp
+        - configMap:
+            name: syncpvc-sync-lock
+          name: lock
+        - emptyDir: {}
+          name: tmp
+        - name: state
+          persistentVolumeClaim:
+            claimName: bisync-state
