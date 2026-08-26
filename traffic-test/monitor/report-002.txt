@@ -1,0 +1,20 @@
+Domain                                                       MISS_Cnt   MISS_MB    HIT_Cnt    HIT_MB     Total_MB   Hit%    
+==================================================================================================================================
+pytorch-package.obs.cn-north-4.myhuaweicloud.com             22         3066.7     19         2561.8     5628.5     45.5    
+cn-north-4-octopus-gitcode-runner.obs.cn-north-4.myhuaweicloud.com 4          179.1      104        4659.1     4838.1     96.3    
+squid-cache                                                  279546     746.9      0          0.0        746.9      0.0     
+gitcode.com                                                  57         185.1      0          0.0        185.1      0.0     
+mirrors.huaweicloud.com                                      284        95.5       106        75.3       170.7      44.1    
+gitee.com                                                    75         114.2      0          0.0        114.2      0.0     
+lfs-cdn.gitcode.com                                          1020       68.3       0          0.0        68.3       0.0     
+archive.ubuntu.com                                           62         24.8       32         9.3        34.1       27.2    
+ppa.launchpad.net                                            10         21.4       0          0.0        21.4       0.0     
+security.ubuntu.com                                          14         12.8       0          0.0        12.8       0.0     
+pypi.org                                                     13         2.5        3          0.7        3.2        20.7    
+atomgit.com                                                  3          0.9        0          0.0        0.9        0.0     
+
+--- Summary ---
+Total MISS: 4518.3 MB (281121 requests)
+Total HIT: 7306.1 MB (264 requests)
+Total Traffic: 11824.4 MB
+Overall Hit Ratio: 61.8%

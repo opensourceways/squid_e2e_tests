@@ -1,0 +1,33 @@
+Domain                                             MISS         HIT          REVAL        Total_MB   EffHit% 
+                                                   Cnt   MB     Cnt   MB     Cnt   MB    
+==================================================================================================================================
+pytorch-package.obs.cn-north-4.myhuaweicloud.com   16    1103.7 60    4830.0 2     0.2    5933.9     81.4    
+mindcluster.obs.cn-north-4.myhuaweicloud.com       1373  1713.0 3     3389.6 0     0.0    5102.6     66.4    
+ports.ubuntu.com                                   103   200.4  198   163.0  979   2259.8 2623.2     92.4    
+mirrors.aliyun.com                                 133   256.1  248   943.5  471   313.0  1512.6     83.1    
+mirrors.huaweicloud.com                            344   170.2  248   992.6  0     0.0    1162.8     85.4    
+mirrors.tuna.tsinghua.edu.cn                       202   158.3  903   706.2  6     5.9    870.4      81.8    
+repo.huaweicloud.com                               108   553.4  23    239.9  115   33.2   826.5      33.0    
+mindstudio-pkg.obs.cn-north-4.myhuaweicloud.com    2     111.4  3     167.2  0     0.0    278.6      60.0    
+squid-cache                                        60496 161.7  0     0.0    0     0.0    161.7      0.0     
+archive.ubuntu.com                                 28    66.3   1     0.2    13    33.0   99.5       33.3    
+files.pythonhosted.org                             8     3.2    124   49.4   0     0.0    52.6       93.9    
+mindx-package.obs.cn-north-4.myhuaweicloud.com     535   41.3   1     0.2    0     0.0    41.5       0.5     
+security.ubuntu.com                                10    25.6   0     0.0    5     12.8   38.4       33.3    
+pypi.tuna.tsinghua.edu.cn                          4     2.6    10    7.8    10    5.4    15.8       83.3    
+mindie-pr.obs.cn-north-4.myhuaweicloud.com         15    6.6    0     0.0    4     0.3    6.9        4.3     
+10.0.0.1                                           1056  3.5    0     0.0    0     0.0    3.5        0.0     
+pypi.org                                           9     0.2    0     0.0    124   2.5    2.7        92.6    
+gitcode.com                                        14    1.7    0     0.0    0     0.0    1.7        0.0     
+
+--- Summary ---
+Total MISS:        4579.4 MB (64709 requests)
+Total HIT:         11489.6 MB (1822 requests)
+Total REVALIDATED: 2666.2 MB (1729 requests, ~304 overhead)
+Total Traffic:     18735.2 MB
+
+Effective Hit Ratio (HIT + REVAL):  75.6%
+Origin Bandwidth Saved:             75.5%
+
+Note: REVALIDATED = TCP_REFRESH_UNMODIFIED (304 Not Modified from origin)
+      Client received full object from cache, origin only sent 304 header
