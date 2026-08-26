@@ -69,14 +69,24 @@ secretDefinition:
   # squid CA 而失败（C 类问题）。
   caNamespaces:
   - squid
-  - op-plugin
   - argo
+  - ragsdk
+  - op-plugin
+  - recsdk
+  - multimodalsdk
+  - indexsdk
+  - mindstudio
+  - slime-ascend
   - mindspeed
-  - drivingsdk                      
-  - fsdpturbo                       
-  - megatronadaptor                 
-  - mindspeed-bridge                
-  - mindspeed-mm                    
+  - megatronadaptor
   - mindspeed-llm
+  - mindspeed-mm
+  - mindspeed-bridge
+  - mindspeed-ops
+  - drivingsdk
+  - fsdpturbo
+  - openubmc
   - memfabric-hybrid
-  - memcache 
+  - memcache
+  - cann
+  - ascend-data-sync

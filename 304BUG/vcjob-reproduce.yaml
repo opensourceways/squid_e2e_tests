@@ -1,0 +1,134 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: reproduce-304-bug-
+  namespace: squid
+  labels:
+    test-type: squid-304-bug
+    kubernetes.io/arch: arm64
+spec:
+  maxRetry: 0
+  minAvailable: 1
+  policies:
+  - action: CompleteJob
+    event: PodFailed
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  - maxRetry: 0
+    minAvailable: 1
+    name: reproduce-304
+    replicas: 1
+    template:
+      metadata: {}
+      spec:
+        activeDeadlineSeconds: 600
+        containers:
+        - name: test
+          image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+          command: ["/bin/bash"]
+          args:
+          - -c
+          - |
+            #!/bin/bash
+            set -e
+            
+            echo "=========================================="
+            echo "Squid 304 Bug Reproduction Test"
+            echo "=========================================="
+            echo ""
+            
+            # Install required tools
+            echo "--- Installing wget, curl, tar ---"
+            apt-get update -qq 2>&1 | tail -2
+            apt-get install -y -qq wget curl 2>&1 | tail -3
+            
+            echo ""
+            echo "--- Environment ---"
+            echo "HTTP_PROXY: $HTTP_PROXY"
+            echo "HTTPS_PROXY: $HTTPS_PROXY"
+            echo "SSL_CERT_FILE: $SSL_CERT_FILE"
+            echo ""
+            
+            # Target URL that triggers the bug
+            TEST_URL="https://mindx-package.obs.cn-north-4.myhuaweicloud.com/Private_Repository/MultimodalSDK/148/master_ci.tar.gz"
+            
+            echo "--- Step 1: Check if file is already cached ---"
+            curl -sI "$TEST_URL" | grep -E "HTTP|Content-Length|Cache-Status|Age" || true
+            
+            echo ""
+            echo "--- Step 2: Download via squid (may get 0 bytes if bug present) ---"
+            cd /tmp
+            rm -f master_ci.tar.gz
+            
+            # Use wget to show detailed transfer info
+            wget --no-check-certificate "$TEST_URL" 2>&1 | tee /tmp/wget.log
+            
+            echo ""
+            echo "--- Step 3: Check downloaded file size ---"
+            FILESIZE=$(stat -c%s master_ci.tar.gz 2>/dev/null || echo "0")
+            echo "Downloaded file size: $FILESIZE bytes"
+            
+            if [ "$FILESIZE" -eq 0 ]; then
+                echo "❌ BUG REPRODUCED: Received 0-byte file!"
+                echo ""
+                echo "Expected: 202104 bytes"
+                echo "Actual: 0 bytes"
+                echo ""
+                echo "This confirms the Squid 304 Content-Length bug."
+                echo ""
+                
+                # Try to extract to show user-visible failure
+                echo "--- Attempting to extract (will fail) ---"
+                if tar -tzf master_ci.tar.gz 2>&1; then
+                    echo "Unexpected: extraction succeeded"
+                else
+                    echo ""
+                    echo "✓ tar/gzip error confirmed (as expected with 0-byte file)"
+                fi
+                
+                exit 1
+            else
+                echo "✅ File downloaded successfully: $FILESIZE bytes"
+                echo ""
+                echo "Either:"
+                echo "  1. Bug has not triggered yet (cache not stale)"
+                echo "  2. Bug has been fixed"
+                echo "  3. Cache was recently purged"
+                echo ""
+                echo "To reproduce, wait ~80 minutes for the cache entry to go stale (freshness lifetime ≈ 80.8 min), then run again."
+            fi
+          env:
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: SSL_CERT_FILE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: CURL_CA_BUNDLE
+            value: /etc/squid-ca/squid-ca.pem
+          volumeMounts:
+          - name: squid-ca
+            mountPath: /etc/squid-ca
+            readOnly: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 1
+              memory: 1Gi
+        restartPolicy: Never
+        volumes:
+        - name: squid-ca
+          secret:
+            secretName: squid-ca-cert
+            optional: true

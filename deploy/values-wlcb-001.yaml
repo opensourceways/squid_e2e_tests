@@ -67,8 +67,24 @@ secretDefinition:
   caTruststoreKey: squid_bazel_trust_v3_prod_jks
   caNamespaces:
   - squid
+  - argo
+  - ragsdk
   - op-plugin
+  - recsdk
+  - multimodalsdk
+  - indexsdk
+  - mindstudio
+  - slime-ascend
+  - mindspeed
+  - megatronadaptor
+  - mindspeed-llm
   - mindspeed-mm
   - mindspeed-bridge
-  - argo
+  - mindspeed-ops
+  - drivingsdk
+  - fsdpturbo
+  - openubmc
+  - memfabric-hybrid
+  - memcache
+  - cann
   - ascend-data-sync
