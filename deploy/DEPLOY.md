@@ -51,8 +51,9 @@ Squid SSL-Bump 需要一套 CA。**出于安全，CA 私有材料不在本仓库
 | `squid-ca` | `squid` | `squid-ca-bundle.pem` | **私钥+证书**（SSL-Bump 签发） | StatefulSet 的 squid 容器（挂到 `/etc/squid/ssl_cert/`），init 容器再拆出 registry-proxy 的 ca.crt/ca.key |
 | `squid-ca` | `squid` | `squid-ca.pem` | 公钥证书 | 备用 |
 | `squid-ca-cert` | 每个用代理的 ns | `squid-ca.pem` | **仅公钥证书** | CI 客户端信任链（挂到 `/etc/squid-ca/`，见 §2.3） |
+| `squid-ca-cert` | 每个用代理的 ns | `squid-bazel-trust.jks` | **JKS trust store**（squid CA + 系统根，bazel/JVM 专用，见 §2.5） | bazel 构建（挂到 `/etc/squid-bazel-trust/`） |
 
-同步行为由 `values.secretDefinition`（`enabled` / `vaultPath` / `caBundleKey` / `caPublicKey` / `caNamespaces`）控制。
+同步行为由 `values.secretDefinition`（`enabled` / `vaultPath` / `caBundleKey` / `caPublicKey` / `caTruststoreKey` / `caNamespaces`）控制。
 生产集群（如 gy-006）走这条路径，**无需手动建 secret**——只要保证引用的 secret name 与上表一致即可。
 
 > 下面的 `kubectl create secret` 仅为**无 Vault 的临时/测试集群**的回退手段（明文操作 CA，切勿用于生产）。
@@ -71,19 +72,20 @@ kubectl -n squid create secret generic squid-ca \
   --from-file=squid-ca.pem=../squid-openssl/ca/006-ca-new/squid-ca.pem \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# 2) CI 命名空间用的 CA 公钥（每个需要代理的命名空间各一份）
+# 2) CI 命名空间用的 CA 公钥 + bazel JKS（每个需要代理的命名空间各一份）
+#    JKS 生成方式：keytool -importcert -alias squid-ca -file squid-ca.pem \
+#      -keystore squid-bazel-trust.jks -storepass changeit -noprompt
 kubectl -n squid create secret generic squid-ca-cert \
   --from-file=squid-ca.pem=../squid-openssl/ca/006-ca-new/squid-ca.pem \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# 3) Bazel JVM trust store（bazel 客户端专用, 见 §2.5）
-kubectl -n squid create configmap squid-bazel-trust \
   --from-file=squid-bazel-trust.jks=../squid-openssl/ca/006-ca-new/squid-bazel-trust.jks \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 > 若配置了 `secretDefinition.enabled: true`，`squid-ca` 与各命名空间的 `squid-ca-cert`
-> 由 secrets-manager 从 Vault 自动同步，无需手动创建。
+> （含 `squid-bazel-trust.jks`）由 secrets-manager 从 Vault 自动同步，无需手动创建。
+> ⚠️ **Vault 只存字符串**：JKS 二进制写入 Vault 时会自动 base64 编码（CLI/API 对非 UTF-8
+> 内容统一 base64）。因此挂载出来的 `squid-bazel-trust.jks` 是 base64 文本，消费端需解码
+> 一次（见 §2.5 的 postStart 配方），这是 Vault 存二进制的标准形态。
 
 ### 1.3 ArgoCD 部署
 
@@ -200,9 +202,6 @@ volumeMounts:
 - name: squid-ca
   mountPath: /etc/squid-ca
   readOnly: true
-- name: squid-bazel-trust          # 仅 bazel/Java 构建需要
-  mountPath: /etc/squid-bazel-trust
-  readOnly: true
 volumes:
 - name: squid-ca
   secret:
@@ -210,12 +209,13 @@ volumes:
     items:
     - key: squid-ca.pem
       path: squid-ca.pem
-    optional: true
-- name: squid-bazel-trust
-  configMap:
-    name: squid-bazel-trust
+    - key: squid-bazel-trust.jks   # Vault 同步的 base64 JKS（见 §1.2）
+      path: squid-bazel-trust.jks
     optional: true
 ```
+
+> ⚠️ K8s 的 secret/configmap 卷**无论 manifest 是否写 `readOnly` 都是只读的**（kubelet 投影，
+> CRI 挂载固定 `ro`）。解码产物写到容器层普通目录（如 `/etc/squid-bazel-trust`，`mkdir -p` 即可）或 `/tmp`。
 
 ### 2.4 postStart 钩子（把 CA 装进系统信任库 + 工具专项）
 
@@ -251,17 +251,38 @@ lifecycle:
 
 ### 2.5 Bazel 专项（JVM trust store）
 
-Bazel 启动 JVM 时**忽略 `JAVA_TOOL_OPTIONS`**，trust 参数只能通过 `.bazelrc`：
+Bazel 启动 JVM 时**忽略 `JAVA_TOOL_OPTIONS`**，trust 参数只能通过 bazelrc 传入。
+且必须写到**全局 `/etc/bazel.bazelrc`**（bazel 无论 cwd/workspace 都会读这个系统级 rc），
+**不要写 `$WORKSPACE/.bazelrc`**——那是 workspace-local rc，仅当以该 workspace 为 cwd 时才被读。
+JKS 经 Vault 同步后是 **base64 文本**（Vault 只存字符串，二进制自动 base64），
+postStart 需先解码再写 `/etc/bazel.bazelrc`：
 
 ```yaml
 # postStart 中：
-cat > "$WORKSPACE/.bazelrc" << 'EOF'
+S=/etc/squid-ca/squid-bazel-trust.jks    # secret 只读层（base64 文本）
+J=/etc/squid-bazel-trust/squid-bazel-trust.jks  # 容器层普通目录（真 JKS）
+mkdir -p /etc/squid-bazel-trust
+if [ -f "$S" ]; then
+  if base64 -d "$S" > "$J" 2>/dev/null \
+     && [ -s "$J" ] \
+     && [ "$(od -An -tx1 -N4 "$J" | tr -d ' ')" = "feedfeed" ]; then
+    echo "JKS decoded from base64 -> $J"
+  else
+    cp "$S" "$J" 2>/dev/null                          # 已是原始二进制则直接拷贝
+    echo "JKS used as-is -> $J"
+  fi
+fi
+cat > /etc/bazel.bazelrc << 'EOF'
 startup --host_jvm_args=-Djavax.net.ssl.trustStore=/etc/squid-bazel-trust/squid-bazel-trust.jks
 startup --host_jvm_args=-Djavax.net.ssl.trustStorePassword=changeit
 EOF
+chmod 644 /etc/bazel.bazelrc 2>/dev/null
 ```
 
-- jks 由 `squid-bazel-trust` ConfigMap 提供（生成方式：`keytool -importcert -alias squid-ca -file squid-ca.pem -keystore squid-bazel-trust.jks -storepass changeit -noprompt`）。
+- JKS 由 Vault 经 `squid-ca-cert` secret 分发（`key: squid-bazel-trust.jks`），生成方式：
+  `keytool -importcert -alias squid-ca -file squid-ca.pem -keystore squid-bazel-trust.jks -storepass changeit -noprompt`
+  （把 squid CA 导入**系统根**副本，`-storepass` 默认 `changeit`）。
+- ⚠️ 坑：secret 卷只读，解码必须写到容器层目录（`mkdir -p /etc/squid-bazel-trust`）或 `/tmp`（实测写 secret 挂载点会 EROFS 静默失败，JVM 回退默认信任库 → PKIX）。
 - github.com 下载超时场景：用 gh-proxy（`https://gh-proxy.test.osinfra.cn/https://github.com/...`）替换 URL，见 `tool/08-bazel.yaml` 的 WORKSPACE 写法。
 
 ### 2.6 完整模板

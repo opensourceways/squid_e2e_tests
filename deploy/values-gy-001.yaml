@@ -1,0 +1,92 @@
+# 本文件是 **gy-001 集群**（openmerlin-guiyang-001）的 values 文件
+#
+# 部署时使用（ArgoCD 的 $values 源，或 helm -f）：
+#   helm install squid ./chart -f values-gy-001.yaml -n squid --kubeconfig ~/.kube/gy-001.yaml
+#
+# 调度：nodeAffinity 绑定唯一 cache 节点 172.16.0.37（amd64，label cache=true，taint cache）
+# 必须带 cache toleration，否则无法调度到该节点。
+#
+# Environment gy-001: production-grade resources, dual-active replicas
+replicas: 2
+
+nodeSelector:
+  kubernetes.io/arch: amd64
+
+nodeAffinity:
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms:
+    - matchExpressions:
+      - key: kubernetes.io/hostname
+        operator: In
+        values:
+        - 172.16.0.37
+
+tolerations:
+- key: cache
+  operator: Equal
+  value: "true"
+  effect: NoSchedule
+
+squid:
+  maxObjectSize: 8192
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+
+registryProxy:
+  proxyReadTimeout: "300s"
+  proxySendTimeout: "300s"
+  proxyConnectReadTimeout: "300s"
+  sendTimeout: "300s"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 8
+      memory: 16Gi
+
+persistence:
+  squidCache:
+    size: 50Gi
+    storageClass: harbor-subpath-sc
+  registryCache:
+    size: 200Gi
+    storageClass: harbor-subpath-sc
+    
+secretDefinition:
+  enabled: true
+  vaultPath: secrets/data/ascend/ci
+  caBundleKey: squid_ca_bundle_v3_prod_pem
+  caPublicKey: squid_ca_v3_prod_pem
+  caTruststoreKey: squid_bazel_trust_v3_prod_jks
+  # CA 同步到运行 VCJob 的命名空间（gy-001 实测：op-plugin/argo/mindspeed 跑 VCJob），
+  # 这样注入代理时 squid-ca-cert 才能挂载进 CI 容器，否则 wget/curl 类工具会因不信任
+  # squid CA 而失败（C 类问题）。
+  caNamespaces:
+  - squid
+  - argo
+  - ragsdk
+  - op-plugin
+  - recsdk
+  - multimodalsdk
+  - indexsdk
+  - mindstudio
+  - slime-ascend
+  - mindspeed
+  - megatronadaptor
+  - mindspeed-llm
+  - mindspeed-mm
+  - mindspeed-bridge
+  - mindspeed-ops
+  - drivingsdk
+  - fsdpturbo
+  - openubmc
+  - memfabric-hybrid
+  - memcache
+  - cann
+  - ascend-data-sync
