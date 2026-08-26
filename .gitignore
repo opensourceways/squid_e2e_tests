@@ -4,3 +4,9 @@ test-report.txt
 result.json
 k8s/*.csv
 buildkit/src/
+.metrics-state
+.metrics-baseline
+.metrics-k8s-state
+.metrics-k8s-baseline
+traffic-test/logs
+traffic-test/traffic-gen

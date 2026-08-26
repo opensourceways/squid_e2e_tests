@@ -5,6 +5,7 @@ namespace: squid
 # if one pod dies the other keeps serving - no failover window.
 replicas: 2
 nodeSelector: {}
+nodeAffinity: {}
 
 # Probe tuning. readiness drives Service endpoint membership, so keep it
 # fast: 5s x 2 = worst-case ~10s to drop a dead endpoint (HTTP cachemgr
@@ -29,7 +30,7 @@ images:
     repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/boynux/squid-exporter
     tag: "v1.13.0"
 
-alpineMirror: "https://mirrors.ustc.edu.cn/alpine/v3.23"
+alpineMirror: "https://mirrors.huaweicloud.com/alpine/v3.23"
 
 squid:
   cacheMemory: 512
@@ -88,8 +89,9 @@ persistence:
 secretDefinition:
   enabled: false
   vaultPath: secrets/data/ascend/ci
-  caBundleKey: squid_ca_bundle_pem
-  caPublicKey: squid_ca_pem
+  caBundleKey: squid_ca_bundle_v3_pem
+  caPublicKey: squid_ca_v3_pem
+  caTruststoreKey: squid_bazel_trust_v3_jks
   caNamespaces: []
   # - buildkitd
   # - ascend-gha-runners

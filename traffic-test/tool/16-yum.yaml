@@ -1,0 +1,159 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: test-squid-yum-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-squid-yum
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 1800
+  tasks:
+    - name: test-squid-yum
+      replicas: 1
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/openeuler/openeuler:24.03
+              command:
+                - bash
+                - -c
+              args:
+                - |
+                  #!/bin/bash
+                  set -e
+                  T_START=$(date +%s%3N)
+
+                  echo ""
+                  echo "=========================================="
+                  echo "Scenario 16: yum/dnf install (openEuler 24.03)"
+                  echo "=========================================="
+                  echo "os: $(grep -E '^(NAME|VERSION)=' /etc/os-release | tr '\n' ' ')"
+                  echo "yum: $(yum --version 2>&1 | head -1)"
+                  echo "--- switch yum repos to huaweicloud mirror ---"
+                  sed -i 's|https://repo.openeuler.org|https://mirrors.huaweicloud.com/openeuler|g; /^metalink=/d' /etc/yum.repos.d/*.repo 2>/dev/null || true
+                  grep -h "baseurl" /etc/yum.repos.d/openEuler.repo 2>/dev/null | head -1
+
+                  echo ""
+                  echo "--- yum makecache (repo metadata via squid) ---"
+                  T0=$(date +%s%3N)
+                  timeout 120 yum makecache 2>&1 | tail -3
+                  T1=$(date +%s%3N)
+                  echo "makecache: $((T1 - T0))ms"
+
+                  echo ""
+                  echo "--- yum install packages (binary RPMs via squid) ---"
+                  T0=$(date +%s%3N)
+                  timeout 120 yum install -y curl wget git jq 2>&1 | tail -3
+                  T1=$(date +%s%3N)
+                  echo "yum install: $((T1 - T0))ms"
+                  curl --version | head -1
+                  wget --version | head -1
+                  git --version
+                  jq --version
+
+                  echo ""
+                  echo "=========================================="
+                  T_END=$(date +%s%3N)
+                  echo "DURATION: $((T_END - T_START))ms"
+                  echo "✅ Scenario 16 completed."
+                  echo "=========================================="
+              lifecycle:
+                postStart:
+                  exec:
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set +e
+
+                        # Bazel JVM trust: point JVM at the mounted squid-CA keystore
+                        # (Bazel ignores JAVA_TOOL_OPTIONS; args must come via .bazelrc)
+                        cat > "$WORKSPACE/.bazelrc" << 'EOF'
+                        common --noenable_bzlmod
+                        common --registry=https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/
+                        build --cxxopt=-std=c++17
+                        startup --host_jvm_args=-Djavax.net.ssl.trustStore=/etc/squid-bazel-trust/squid-bazel-trust.jks
+                        startup --host_jvm_args=-Djavax.net.ssl.trustStorePassword=changeit
+                        EOF
+
+                        P=/etc/squid-ca/squid-ca.pem
+                        if [ -f "$P" ]; then
+                          if [ -d /etc/pki/ca-trust/source/anchors ]; then
+                            cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                            update-ca-trust extract >/dev/null 2>&1
+                          else
+                            cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                            update-ca-certificates -f >/dev/null 2>&1
+                          fi
+                        fi
+
+                        if command -v apt-get >/dev/null 2>&1 && [ -n "$HTTPS_PROXY" ]; then
+                          mkdir -p /etc/apt/apt.conf.d
+                          printf 'Acquire::http::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\nAcquire::https::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\n' > /etc/apt/apt.conf.d/99squid-proxy
+                        fi
+
+                        exit 0
+              workingDir: /workspace
+              resources:
+                limits:
+                  cpu: "2"
+                  memory: 2Gi
+                requests:
+                  cpu: "2"
+                  memory: 2Gi
+              env:
+                - name: WORKSPACE
+                  value: /workspace
+                - name: HTTP_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: HTTPS_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: http_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: https_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: NO_PROXY
+                  value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+                - name: no_proxy
+                  value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+                - name: SSL_CERT_FILE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: CURL_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: REQUESTS_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: PIP_CERT
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: NODE_EXTRA_CA_CERTS
+                  value: /etc/squid-ca/squid-ca.pem
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true
+          nodeSelector:
+            kubernetes.io/arch: arm64
+          imagePullSecrets:
+            - name: huawei-swr-image-pull-secret-model-gy
+          activeDeadlineSeconds: 2400
+          securityContext:
+            runAsUser: 0
+          restartPolicy: Never

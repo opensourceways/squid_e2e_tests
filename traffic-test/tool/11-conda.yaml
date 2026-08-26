@@ -1,11 +1,11 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  generateName: test-squid-github-
+  generateName: test-squid-conda-
   namespace: squid
   labels:
     kubernetes.io/arch: arm64
-    pipeline/run-id: test-squid-github
+    pipeline/run-id: test-squid-conda
 spec:
   policies:
     - event: PodFailed
@@ -15,7 +15,7 @@ spec:
   minAvailable: 1
   ttlSecondsAfterFinished: 1800
   tasks:
-    - name: test-squid-github
+    - name: test-squid-conda
       replicas: 1
       maxRetry: 1
       template:
@@ -30,43 +30,48 @@ spec:
                 - |
                   #!/bin/bash
                   set -e
-
                   sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.huaweicloud.com/ubuntu-ports|g' \
                     /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list 2>/dev/null || true
                   apt-get update -qq 2>&1 | tail -2 || true
-                  apt-get install -y -qq curl git 2>&1 | tail -3 || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq curl git 2>&1 | tail -3; }
-                  git config --global url."https://gh-proxy.test.osinfra.cn/https://github.com".insteadOf "https://github.com" || echo "WARNING: git config failed for github"
-                  git config --global --get-regexp 'url\.' 2>/dev/null | head -1
+                  apt-get install -y -qq wget curl 2>&1 | tail -3 || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq wget curl 2>&1 | tail -3; }
                   T_START=$(date +%s%3N)
 
-                  echo ""
-                  echo "=========================================="
-                  echo "Scenario 3: GitHub access through proxy"
-                  echo "=========================================="
-
-                  echo "--- github.com reachability ---"
-                  echo -n "HTTPS GET github.com              → "
-                  curl -s -o /dev/null -w "%{http_code} (%{time_total}s)\n" https://github.com || echo "❌ FAILED"
-
-                  echo -n "HTTPS GET api.github.com          → "
-                  curl -s -o /dev/null -w "%{http_code} (%{time_total}s)\n" https://api.github.com || echo "❌ FAILED"
-
-                  echo -n "HTTPS GET raw.githubusercontent.com → "
-                  curl -s -o /dev/null -w "%{http_code} (%{time_total}s)\n" \
-                    https://raw.githubusercontent.com/vllm-project/vllm-ascend/main/README.md || echo "❌ FAILED"
+                  # conda (python/requests-based) honors https_proxy + SSL_CERT_FILE
 
                   echo ""
-                  echo "--- git clone (depth=1) ---"
+                  echo "=========================================="
+                  echo "Scenario 11: conda (conda-forge — DrivingSDK, model-agent,"
+                  echo "              MindSpeed-MM, modelzoo-GPL ...)"
+                  echo "=========================================="
+
+                  echo "--- Download Miniconda installer (arm64, ~100MB via squid) ---"
                   cd /tmp
-                  git clone --depth=1 https://github.com/vllm-project/vllm-ascend.git 2>&1 | tail -3
-                  echo "✅ git clone completed"
-                  ls vllm-ascend/ | head -5
+                  T0=$(date +%s%3N)
+                  wget -q --timeout=90 --tries=2 https://mirror.nju.edu.cn/anaconda/miniconda/Miniconda3-latest-Linux-aarch64.sh -O miniconda.sh
+                  T1=$(date +%s%3N)
+                  echo "installer download: $((T1 - T0))ms ($(stat -c%s miniconda.sh) bytes)"
+
+                  echo ""
+                  echo "--- Install miniconda ---"
+                  bash miniconda.sh -b -p /opt/conda > /dev/null 2>&1
+                  export PATH=/opt/conda/bin:$PATH
+                  conda --version
+
+                  echo ""
+                  echo "--- conda create python+numpy from conda-forge (cold) ---"
+                  T0=$(date +%s%3N)
+                  conda create -y -n testenv --override-channels -c https://mirror.nju.edu.cn/anaconda/cloud/conda-forge/ python=3.11 numpy 2>&1 | tail -6
+                  T1=$(date +%s%3N)
+                  echo "conda create: $((T1 - T0))ms"
+
+                  echo ""
+                  conda run -n testenv python -c "import numpy; print('✅ numpy', numpy.__version__, 'works through squid')"
 
                   echo ""
                   echo "=========================================="
                   T_END=$(date +%s%3N)
                   echo "DURATION: $((T_END - T_START))ms"
-                  echo "✅ Scenario 3 completed."
+                  echo "✅ Scenario 11 completed."
                   echo "=========================================="
               lifecycle:
                 postStart:
@@ -127,7 +132,6 @@ spec:
                   value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
                 - name: no_proxy
                   value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
-
                 - name: SSL_CERT_FILE
                   value: /etc/squid-ca/squid-ca.pem
                 - name: CURL_CA_BUNDLE
