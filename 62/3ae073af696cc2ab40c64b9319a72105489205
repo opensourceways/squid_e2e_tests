@@ -1,0 +1,87 @@
+304BUG/.gitignore
+  s_26c665fa957eda::t_33b4010e3b6965 1
+304BUG/README.md
+  s_4691f0dab6fd3f::t_53d85009b90177 223
+  s_4691f0dab6fd3f::t_0885c929c9f2a3 86
+  s_4691f0dab6fd3f::t_5aff9af9d32bac 83-85
+  s_4691f0dab6fd3f::t_7ccdb8de02c0a3 87-89,220-222
+  s_4691f0dab6fd3f::t_5e5b962213db1e 224-226
+304BUG/EXECUTION_LOG.md
+  s_4691f0dab6fd3f::t_2d2b45ac57af0e 35
+  s_4691f0dab6fd3f::t_3063c74ad1b3f9 32-34
+  s_4691f0dab6fd3f::t_4842ede2c4d363 36-38
+304BUG/reproduce.sh
+  s_4691f0dab6fd3f::t_69c2caf7aa3bb2 205-206
+  s_4691f0dab6fd3f::t_bdb9342f998f03 75,80-91,103,116,121,189,192,198,203,209,215,218,244
+  s_4691f0dab6fd3f::t_5e2cd9435eb22c 72-74
+  s_4691f0dab6fd3f::t_75dd7b00f28e6f 76-79
+  s_4691f0dab6fd3f::t_bc54eb9fe8fb88 92-94,100-102
+  s_4691f0dab6fd3f::t_78f3a766bef029 104-106,113-115
+  s_4691f0dab6fd3f::t_6ff05c95eb0d58 117-120
+  s_4691f0dab6fd3f::t_c9a3548ca271df 122-124,186-188
+  s_4691f0dab6fd3f::t_04cac1a6614ae6 190-191
+  s_4691f0dab6fd3f::t_2ffa5552c48367 193-197
+  s_4691f0dab6fd3f::t_ef159dd3857bbf 199-202
+  s_4691f0dab6fd3f::t_62c1db6ca02db1 204
+  s_4691f0dab6fd3f::t_20f6d6b3b97942 207-208
+  s_4691f0dab6fd3f::t_00fa3e47219693 210-214
+  s_4691f0dab6fd3f::t_5080b720e26f6d 216-217
+  s_4691f0dab6fd3f::t_9503d1a42e47c9 219-221,241-243
+  s_4691f0dab6fd3f::t_bc3fb775850a5a 245-247
+304BUG/vcjob-reproduce.yaml
+  s_4691f0dab6fd3f::t_944abd289b2de4 99
+  s_4691f0dab6fd3f::t_4a03bdc30d588b 96-98
+  s_4691f0dab6fd3f::t_ea26adf643f966 100-102
+304BUG/SUMMARY.md
+  s_4691f0dab6fd3f::t_ceb1e356f289f0 50
+  s_4691f0dab6fd3f::t_0d62f0fa8c05b9 52-53
+  s_4691f0dab6fd3f::t_46b481ec5d1732 38
+  s_4691f0dab6fd3f::t_aa19b650a725e9 35-37
+  s_4691f0dab6fd3f::t_c9f92511486658 39-41,47-49
+  s_4691f0dab6fd3f::t_89732cb691907e 51
+  s_4691f0dab6fd3f::t_99645ee809041a 54-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "623ae073af696cc2ab40c64b9319a72105489205",
+  "prompts": {},
+  "sessions": {
+    "s_26c665fa957eda": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-9253507d-cd4b-45e9-a535-e5e361e05d99",
+        "model": "default"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "client_type": "ide",
+        "source_scene": "cue",
+        "external_session_id": "icr-9253507d-cd4b-45e9-a535-e5e361e05d99",
+        "tool": "trae-cue",
+        "edit_kind": "file_edit"
+      }
+    },
+    "s_4691f0dab6fd3f": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a8eb811402536a81294adc5",
+        "model": "DeepSeek-V4-Flash-Official"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "external_session_id": "6a8eb811402536a81294adc5",
+        "operation_id": "6a8eb8a7402536a81294ae11",
+        "tool_id": "icube:applyChatSnapshotPatch",
+        "client_type": "ide",
+        "session_id": "6a8eb811402536a81294adc5",
+        "runtime_client": "trae-tob-git-ai",
+        "edit_kind": "file_edit",
+        "dedupe_key": "6a8eb811402536a81294adc5:6a8eb8a7402536a81294ae11:afterEdit:4ab88bd2",
+        "tool_use_id": "6a8eb8a7402536a81294ae11",
+        "tool_type": "builtin",
+        "source_scene": "agent"
+      }
+    }
+  }
+}
