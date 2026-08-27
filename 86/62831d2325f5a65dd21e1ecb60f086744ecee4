@@ -1,0 +1,50 @@
+deploy/values-006.yaml
+  s_4691f0dab6fd3f::t_4ea53fbbf3623e 25-29
+deploy/chart/templates/configmap.yaml
+  s_4691f0dab6fd3f::t_9746398e2fcc0a 19
+deploy/chart/values.yaml
+  s_4691f0dab6fd3f::t_360970aa542767 25-26
+  s_4691f0dab6fd3f::t_3f0784d7d08f70 27-28
+deploy/chart/templates/statefulset.yaml
+  s_4691f0dab6fd3f::t_d483c30903f826 89
+  s_4691f0dab6fd3f::t_8fed6e66736430 94
+  s_4691f0dab6fd3f::t_77afd83af92753 87-88
+  s_4691f0dab6fd3f::t_b098a06cbca15a 70
+  s_4691f0dab6fd3f::t_fe1a8796c5941b 90-91,105
+deploy/chart/Chart.yaml
+  s_4691f0dab6fd3f::t_80bd39055aeb94 5-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "8662831d2325f5a65dd21e1ecb60f086744ecee4",
+  "prompts": {},
+  "humans": {
+    "h_dc619ff2c05908": {
+      "author": "chenqi49 <479148871@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_4691f0dab6fd3f": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a8eb811402536a81294adc5",
+        "model": "DeepSeek-V4-Flash-Official"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "edit_kind": "file_edit",
+        "external_session_id": "6a8eb811402536a81294adc5",
+        "tool_type": "builtin",
+        "source_scene": "agent",
+        "dedupe_key": "6a8eb811402536a81294adc5:6a8fb18a402536a81294b549:afterEdit:89b6293e",
+        "session_id": "6a8eb811402536a81294adc5",
+        "tool_use_id": "6a8fb18a402536a81294b549",
+        "runtime_client": "trae-tob-git-ai",
+        "operation_id": "6a8fb18a402536a81294b549",
+        "client_type": "ide",
+        "tool_id": "icube:applyChatSnapshotPatch"
+      }
+    }
+  }
+}
