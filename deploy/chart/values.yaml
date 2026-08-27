@@ -22,8 +22,10 @@ probes:
 
 images:
   squid:
-    repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine
-    tag: "3.23.3"
+    repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/squid-cache/squid
+    tag: "v7.7.1"
+    # 默认 IfNotPresent；需要强制拉最新镜像的集群（如 006 自建镜像调试期）覆写为 Always
+    imagePullPolicy: IfNotPresent
   registryProxy:
     repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/rpardini/docker-registry-proxy
     tag: "0.6.5"

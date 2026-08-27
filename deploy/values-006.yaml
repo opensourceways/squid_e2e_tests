@@ -22,6 +22,11 @@ squid:
       cpu: 2
       memory: 4Gi
 
+images:
+  squid:
+    # 自建镜像调试期强制拉取最新，避免命中节点上旧的 v7.7.1 标签镜像
+    imagePullPolicy: Always
+
 registryProxy:
   proxyReadTimeout: "300s"
   proxySendTimeout: "300s"

@@ -67,6 +67,7 @@ spec:
       containers:
       - name: squid
         image: {{ .Values.images.squid.repository }}:{{ .Values.images.squid.tag }}
+        imagePullPolicy: {{ .Values.images.squid.imagePullPolicy | default "IfNotPresent" }}
         ports:
         - containerPort: 3129
           name: proxy
@@ -83,17 +84,14 @@ spec:
         - /bin/sh
         - -c
         - |
-          MIRROR={{ .Values.alpineMirror }}
-          cat > /etc/apk/repositories <<EOF
-          $MIRROR/main
-          $MIRROR/community
-          EOF
-
-          apk add --no-cache squid openssl python3 ca-certificates curl
-
+          # 自建镜像（基于 squid-cache/squid 构建，squid 装到 /usr/local/squid，squid 用户 uid/gid=31）
+          # 镜像已内置 squid 及依赖，无需 apk 安装；注意不是官方 squid-cache/squid 镜像。
+          # squid 二进制编译默认 cache_log=/var/logs/cache.log（该目录不存在），
+          # 必须显式指定到 /var/log/squid 并先建目录，否则 squid -z / squid 启动会失败。
+          mkdir -p /var/log/squid
           if [ -f /etc/squid/ssl_cert/squid-ca-bundle.pem ]; then
             if [ ! -d /var/cache/squid-ssl-db ]; then
-              /usr/lib/squid/security_file_certgen \
+              /usr/local/squid/libexec/security_file_certgen \
                 -c -s /var/cache/squid-ssl-db -M 8MB
               chown -R squid:squid /var/cache/squid-ssl-db 2>/dev/null || true
             fi
@@ -104,14 +102,13 @@ spec:
             [ -d /var/spool/squid/$i ] || MISSING=1
           done
           if [ "$MISSING" = "1" ]; then
-            printf 'cache_dir ufs /var/spool/squid {{ .Values.squid.cacheDiskSize }} 16 8\npid_filename /tmp/squid-init.pid\n' > /tmp/squid-init.conf
+            printf 'cache_dir ufs /var/spool/squid {{ .Values.squid.cacheDiskSize }} 16 8\npid_filename /tmp/squid-init.pid\ncache_log /var/log/squid/cache.log\n' > /tmp/squid-init.conf
             squid -z -f /tmp/squid-init.conf 2>&1 || true
             rm -f /tmp/squid-init.pid 2>/dev/null || true
           fi
 
           rm -f /run/squid.pid /var/run/squid.pid /var/run/squid/squid.pid 2>/dev/null || true
 
-          mkdir -p /var/log/squid
           tail -F /var/log/squid/access.log &
           tail -F /var/log/squid/cache.log >&2 &
 
