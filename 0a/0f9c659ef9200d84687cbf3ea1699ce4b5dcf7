@@ -1,0 +1,70 @@
+deploy/chart/templates/statefulset.yaml
+  s_4691f0dab6fd3f::t_2762a75abcb241 212
+  s_4691f0dab6fd3f::t_2650e1d8f9124b 227-229
+  s_4691f0dab6fd3f::t_6f5c6d82246162 218-219
+  s_4691f0dab6fd3f::t_640293a501552c 198-201
+  s_4691f0dab6fd3f::t_e42deb21fa8642 251-255
+  s_4691f0dab6fd3f::t_2463af18d201a6 256-257,262
+  s_4691f0dab6fd3f::t_ac77eb52673ec9 206-211,213-217,220-226,230-233
+  s_4691f0dab6fd3f::t_51fb00a4d0b3d0 258-261
+deploy/values-006.yaml
+  s_4691f0dab6fd3f::t_f66261a53d76a9 31-32,37-39
+deploy/chart/templates/registry-exporter-configmap.yaml
+  s_4691f0dab6fd3f::t_ad1bf9a7420b2b 3-11,17,35-38,40,59-60,63,66-69,72-100,103,121-122,140,142-162,183,185
+  s_4691f0dab6fd3f::t_6b5bf48874524a 1-2,12,23-34,44-45,47-58,135-139,179-181,186
+  s_4691f0dab6fd3f::t_2529549dba8406 187-188,190
+  s_4691f0dab6fd3f::t_f00dbfd44e0574 42-43,46
+  s_4691f0dab6fd3f::t_5892bfb73dff3c 19-22
+  s_4691f0dab6fd3f::t_651856c3d5edc4 141,164,167,170-178
+  s_4691f0dab6fd3f::t_2961c3a7259a64 13-15
+  s_4691f0dab6fd3f::t_3d90b722fdb009 104-119
+  s_4691f0dab6fd3f::t_6b2f63e5cc74e7 189,191-193
+  s_4691f0dab6fd3f::t_80bb934b642c3f 16,18,39,41,61-62,64-65,70-71,101-102,120,123-134,163,165-166,168-169,182,184
+deploy/chart/templates/configmap.yaml
+  s_4691f0dab6fd3f::t_6d93527b60d91f 83-84
+deploy/LOG-ROTATION.md
+  s_4691f0dab6fd3f::t_ee858c03d4e09e 1-109
+deploy/REGISTRY-EXPORTER-METRICS.md
+  s_4691f0dab6fd3f::t_b9111925449d65 202
+  s_4691f0dab6fd3f::t_432c12cff7f022 220-229
+  s_4691f0dab6fd3f::t_665a793209f50d 149-151
+  s_4691f0dab6fd3f::t_cf5f016815ad10 147-148,152
+  s_4691f0dab6fd3f::t_5bfe6e63449438 1-146,153-201,203-219
+deploy/chart/values.yaml
+  s_4691f0dab6fd3f::t_08cb41aedb1ca5 84-86,90
+  s_4691f0dab6fd3f::t_eaafc926f67a9d 87-89,93-99
+  s_4691f0dab6fd3f::t_c2575584f2f365 91-92
+deploy/chart/templates/service.yaml
+  s_4691f0dab6fd3f::t_a7e46c9f968b13 18
+  s_4691f0dab6fd3f::t_1187ae91c10e90 16-17,19-20
+  s_4691f0dab6fd3f::t_77f077faa0b693 41-42,44
+  s_4691f0dab6fd3f::t_68d1232df436fd 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "0a0f9c659ef9200d84687cbf3ea1699ce4b5dcf7",
+  "prompts": {},
+  "sessions": {
+    "s_4691f0dab6fd3f": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a8eb811402536a81294adc5",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "tool_name": "Edit",
+        "edit_kind": "file_edit",
+        "external_session_id": "6a8eb811402536a81294adc5",
+        "display_model_name": "DeepSeek-V4-Flash 正式版",
+        "session_id": "6a8eb811402536a81294adc5",
+        "tool_use_id": "6a95144d083286c64cd8e8cc",
+        "runtime_client": "trae-tob-git-ai",
+        "client_type": "ide",
+        "operation_id": "6a95144d083286c64cd8e8cc",
+        "source_scene": "agent"
+      }
+    }
+  }
+}
