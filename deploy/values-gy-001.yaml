@@ -29,6 +29,7 @@ tolerations:
 
 squid:
   maxObjectSize: 8192
+  cacheDiskSize: 204800
   resources:
     requests:
       cpu: 500m
@@ -52,6 +53,8 @@ registryProxy:
 
 persistence:
   squidCache:
+    # 注意：volumeClaimTemplates 不可变，size 只影响新建 PVC；
+    # 线上 PVC 已手动 kubectl patch 扩到 200Gi（实际生效值）。
     size: 50Gi
     storageClass: harbor-subpath-sc
   registryCache:
@@ -90,3 +93,4 @@ secretDefinition:
   - memcache
   - cann
   - ascend-data-sync
+  - visionsdk

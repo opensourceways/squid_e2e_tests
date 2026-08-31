@@ -185,13 +185,12 @@ def format_report(miss_bytes: Dict, miss_count: Dict, hit_bytes: Dict, hit_count
     results.sort(reverse=True)
     
     lines = []
-    lines.append(f'{"Domain":<50} {"MISS":<12} {"HIT":<12} {"REVAL":<12} {"Total_MB":<10} {"EffHit%":<8}')
-    lines.append(f'{"":50} {"Cnt":<6}{"MB":<6} {"Cnt":<6}{"MB":<6} {"Cnt":<6}{"MB":<6}')
-    lines.append('=' * 130)
+    lines.append(f'{"Domain":<50}{"MISS_Cnt":>9}{"MISS_MB":>10}{"HIT_Cnt":>9}{"HIT_MB":>10}{"REVAL_Cnt":>10}{"REVAL_MB":>10}{"Total_MB":>10}{"EffHit%":>8}')
+    lines.append('=' * 126)
     
     for total_mb, domain, m_cnt, m_mb, h_cnt, h_mb, r_cnt, r_mb, eff_ratio in results[:max_rows]:
-        lines.append(f'{domain:<50} {m_cnt:<6}{m_mb:<6.1f} {h_cnt:<6}{h_mb:<6.1f} '
-                    f'{r_cnt:<6}{r_mb:<6.1f} {total_mb:<10.1f} {eff_ratio:<8.1f}')
+        lines.append(f'{domain:<50}{m_cnt:>9}{m_mb:>10.1f}{h_cnt:>9}{h_mb:>10.1f}'
+                    f'{r_cnt:>10}{r_mb:>10.1f}{total_mb:>10.1f}{eff_ratio:>8.1f}')
     
     # Summary
     total_miss = sum(miss_bytes.values()) / 1048576.0

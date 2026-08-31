@@ -1,0 +1,88 @@
+# ⚠️ 本文件是 **ascend-cn12-001 集群**的 values —— 替换旧 squid（squid-openssl chart，squid 7.6）
+#
+# 部署时使用（helm 直装，cn12-001 由 helm 管理、非 ArgoCD）：
+#   helm install squid ./chart -n squid -f values-cn12-001.yaml --kubeconfig ~/.kube/ascend-cn12-001.yaml
+#
+# 替换背景（2026-08-27 勘察）：
+#   - 旧 release: squid / squid-openssl-0.1.0 / squid 7.6，Deployment 单副本，无 exporter
+#   - 旧 PVC: squid-cache-pvc(200Gi RWX) + registry-cache-pvc(400Gi RWX)，sfsturbo-subpath-sc
+#   - 旧 CA: CN=SquidCacheCA-hk001，指纹 50:01:F3...（非 Vault 生产 CA），squid-ca-cert 是 ConfigMap
+#   - 替换后采用新架构：StatefulSet + registry-proxy + exporter，CA 走 Vault secretDefinition（与 gy-001/002/wlcb-001 一致）
+#
+# 新 chart 是全新 StatefulSet，volumeClaimTemplates 无历史约束，size 直接生效（可写 200Gi，无需 50Gi 占位）。
+#
+# Environment cn12-001: 双活（replicas=2，SQUID-OVERVIEW §7）
+replicas: 2
+
+# 节点架构：旧 squid 跑在 amd64（192.168.0.74，已 cordon）；
+# 新 chart 镜像 v7.7.1 在 gy-001/002/006 均为 amd64 运行，故选 amd64。
+# 可用可调度 amd64 节点：192.168.0.157 / .170 / .171 / .42 / .62（.74 已 cordon 不会被选中）。
+nodeSelector:
+  kubernetes.io/arch: amd64
+
+# cn12-001 squid 命名空间已有同名 SWR pull secret（拉取 modelfoundry 私有镜像）
+imagePullSecrets:
+- name: huawei-swr-image-pull-secret-model-gy
+
+squid:
+  # 缓存上限 204800 MB = 200 GiB，与 squidCache PVC 对齐（同其他集群 200G 升级）
+  cacheDiskSize: 204800
+  maxObjectSize: 8192
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+
+registryProxy:
+  # registry 域 splice 到同 Pod 的 rpardini sidecar，blob 缓存 150G（PVC 200Gi）
+  cacheMaxSize: "150g"
+  proxyReadTimeout: "300s"
+  proxySendTimeout: "300s"
+  proxyConnectReadTimeout: "300s"
+  sendTimeout: "300s"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 8
+      memory: 16Gi
+
+persistence:
+  squidCache:
+    size: 200Gi
+    storageClass: sfsturbo-subpath-sc
+  registryCache:
+    size: 400Gi
+    storageClass: sfsturbo-subpath-sc
+
+# CA 从 Vault(secrets/data/ascend/ci) 同步，生产 `_prod` key（与 gy-001/002/wlcb-001 一致）：
+#   - squid 命名空间生成 secret squid-ca（squid-ca-bundle.pem + squid-ca.pem）
+#   - 每个 caNamespaces 生成 secret squid-ca-cert（squid-ca.pem + squid-bazel-trust.jks）
+# ⚠️ 关键：cn12-001 的 Vault(secrets/data/ascend/ci) 生产 CA 实测指纹 73:71:2A:54...（CN=SquidCacheCA-hk001），
+#   与旧 ConfigMap 的 CA(38:49:77...) 不同！替换后旧 CA 信任的 CI 客户端会 TLS 失败，需按 UPGRADE-cn12-001.md Phase 3
+#   把各命名空间 ConfigMap squid-ca-cert 的 CA 更新为新值（本次已完成）。
+secretDefinition:
+  enabled: true
+  vaultPath: secrets/data/ascend/ci
+  caBundleKey: squid_ca_bundle_v3_prod_pem
+  caPublicKey: squid_ca_v3_prod_pem
+  caTruststoreKey: squid_bazel_trust_v3_prod_jks
+  # cn12-001 跑 CI 的命名空间（GHA runner + buildkitd + karmada 分发的项目空间），按实际调整
+  caNamespaces:
+  - squid
+  - buildkitd
+  - ascend-gha-runners
+  - ascend-gha-runners-gy004
+  - ascend-gha-runners-gy005
+  - ascend-gha-runners-gy006
+  - nv-action
+  - ascend
+  - ascend-pytorch
+  # 有旧 ConfigMap squid-ca-cert 的命名空间，补齐让 SecretDefinition 也同步 Secret squid-ca-cert
+  - triton-ascend
+  - vllm-ascend
+  - vllm-project

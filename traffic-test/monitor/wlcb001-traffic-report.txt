@@ -1,0 +1,15 @@
+Domain                                             MISS_Cnt   MISS_MB  HIT_Cnt    HIT_MB REVAL_Cnt  REVAL_MB  Total_MB EffHit%
+==============================================================================================================================
+squid-cache                                          178926     476.1        0       0.0         0       0.0     476.1     0.0
+
+--- Summary ---
+Total MISS:        476.1 MB (178926 requests)
+Total HIT:         0.0 MB (0 requests)
+Total REVALIDATED: 0.0 MB (0 requests, ~304 overhead)
+Total Traffic:     476.1 MB
+
+Effective Hit Ratio (HIT + REVAL):  0.0%
+Origin Bandwidth Saved:             0.0%
+
+Note: REVALIDATED = TCP_REFRESH_UNMODIFIED (304 Not Modified from origin)
+      Client received full object from cache, origin only sent 304 header

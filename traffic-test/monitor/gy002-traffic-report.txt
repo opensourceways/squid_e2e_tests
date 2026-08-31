@@ -1,0 +1,26 @@
+Domain                                             MISS_Cnt   MISS_MB  HIT_Cnt    HIT_MB REVAL_Cnt  REVAL_MB  Total_MB EffHit%
+==============================================================================================================================
+cn-north-4-octopus-gitcode-runner.obs.cn-north-4.myhuaweicloud.com        0       0.0       87    3897.6         2      89.6    3987.2   100.0
+pytorch-package.obs.cn-north-4.myhuaweicloud.com          0       0.0       29    2791.0         1      20.9    2812.0   100.0
+squid-cache                                          178968     478.4        0       0.0         0       0.0     478.4     0.0
+mirrors.huaweicloud.com                                 435      85.5      336     284.0         0       0.0     369.5    76.9
+archive.ubuntu.com                                       33       1.2      224      64.9        72      53.6     119.7    99.0
+ppa.launchpad.net                                         0       0.0       14      74.6        21       0.2      74.8   100.0
+gitcode.com                                              18      61.3        0       0.0         0       0.0      61.3     0.0
+security.ubuntu.com                                       9       0.7        0       0.0        40      44.5      45.2    98.5
+gitee.com                                                24      38.0        0       0.0         0       0.0      38.0     0.0
+lfs-cdn.gitcode.com                                     408      27.3        0       0.0         0       0.0      27.3     0.0
+pypi.org                                                 15       0.0        1       1.1        15       9.7      10.8    99.6
+repo.huaweicloud.com                                      7       0.5        0       0.0         7       0.5       1.0    50.0
+
+--- Summary ---
+Total MISS:        692.9 MB (179924 requests)
+Total HIT:         7113.3 MB (691 requests)
+Total REVALIDATED: 219.0 MB (172 requests, ~304 overhead)
+Total Traffic:     8025.2 MB
+
+Effective Hit Ratio (HIT + REVAL):  91.4%
+Origin Bandwidth Saved:             91.4%
+
+Note: REVALIDATED = TCP_REFRESH_UNMODIFIED (304 Not Modified from origin)
+      Client received full object from cache, origin only sent 304 header
