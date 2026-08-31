@@ -28,10 +28,15 @@ images:
     imagePullPolicy: Always
 
 registryProxy:
+  # registry 域 splice 到同 Pod 的 rpardini sidecar，blob 缓存 100G（PVC 200Gi）
+  cacheMaxSize: "100g"
   proxyReadTimeout: "300s"
   proxySendTimeout: "300s"
   proxyConnectReadTimeout: "300s"
   sendTimeout: "300s"
+  exporter:
+    # 仓库缓存指标 exporter（只读缓存卷，出 blob 数/磁盘水位），见 registry-exporter-configmap.yaml
+    enabled: true
   resources:
     requests:
       cpu: 250m

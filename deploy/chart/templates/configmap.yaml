@@ -80,6 +80,8 @@ data:
     reply_header_replace Vary Accept-Encoding
 
     # ── 日志（tail -F → kubectl logs 可见）──
+    # logfile_rotate 10：access.log / cache.log 各保留 10 份历史后轮转，防容器层日志无限膨胀
+    logfile_rotate 10
     access_log daemon:/var/log/squid/access.log
     cache_log /var/log/squid/cache.log
     cache_store_log none

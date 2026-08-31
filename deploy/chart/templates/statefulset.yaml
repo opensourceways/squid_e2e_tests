@@ -195,8 +195,40 @@ spec:
           mountPath: /ca
         - name: registry-cache
           mountPath: /docker_mirror_cache
+        - name: nginx-access-log
+          # 覆盖镜像里的 access.log->/dev/stdout 符号链接，让 nginx 把 access_log 写成真实文件，
+          # 供 registry-exporter 增量解析出 requests/hits/bytes 等计数指标（见 registry-exporter-configmap.yaml）
+          mountPath: /var/log/nginx
         resources:
           {{- toYaml .Values.registryProxy.resources | nindent 10 }}
+      {{- end }}
+
+      {{- if and .Values.registryProxy.enabled .Values.registryProxy.exporter.enabled }}
+      - name: registry-exporter
+        image: {{ .Values.images.initContainer.repository }}:{{ .Values.images.initContainer.tag }}
+        command: ["/bin/sh", "/script/exporter.sh"]
+        ports:
+        - containerPort: {{ .Values.registryProxy.exporter.listenPort }}
+          name: regmetrics
+        env:
+        - name: REGISTRY_CACHE_MAX
+          value: {{ .Values.registryProxy.cacheMaxSize | quote }}
+        - name: REGISTRY_EXPORTER_INTERVAL
+          value: {{ .Values.registryProxy.exporter.interval | quote }}
+        - name: REGISTRY_EXPORTER_MAX_LOG_LINES
+          value: {{ .Values.registryProxy.exporter.maxLogLines | quote }}
+        volumeMounts:
+        - name: registry-exporter-script
+          mountPath: /script
+          readOnly: true
+        - name: registry-cache
+          mountPath: /docker_mirror_cache
+          readOnly: true
+        - name: nginx-access-log
+          # 与 registry-proxy 共享 nginx access.log（真实文件），并在此存 exporter 计数/偏移状态
+          mountPath: /var/log/nginx
+        resources:
+          {{- toYaml .Values.registryProxy.exporter.resources | nindent 10 }}
       {{- end }}
 
       volumes:
@@ -215,6 +247,18 @@ spec:
       {{- if .Values.registryProxy.enabled }}
       - name: registry-ca
         emptyDir: {}
+      {{- end }}
+      {{- if and .Values.registryProxy.enabled .Values.registryProxy.exporter.enabled }}
+      - name: registry-exporter-script
+        configMap:
+          name: registry-exporter-script
+      {{- end }}
+      {{- if and .Values.registryProxy.enabled .Values.registryProxy.exporter.enabled }}
+      - name: nginx-access-log
+        # 上限 128Mi 兜底：exporter 每 30s 轮转日志，正常情况下远达不到该值；
+        # 若轮转失效，emptyDir 撑满会触发 pod 驱逐（eviction），避免无限增长打满节点磁盘
+        emptyDir:
+          sizeLimit: 128Mi
       {{- end }}
   volumeClaimTemplates:
   - metadata:
