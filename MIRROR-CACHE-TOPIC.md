@@ -92,6 +92,74 @@ done
 
 ⚠️ 老 `storeurl_rewrite_program`（只改缓存键不改取回源）在 **Squid 4+ 已移除**；现代 Squid 重写就是真的换源。
 
+---
+
+## 话题一扩展：用户场景 × Squid 拦截机制 × 取舍矩阵
+
+"本质差异"只是协议层结论。完整决策需要三层：**谁在发请求（场景）→ Squid 在哪一步能动手（机制）→ 每种组合的代价（取舍）**。
+
+### 1. 用户场景（谁在发这些请求）
+
+| # | 场景 | 典型请求形态 | URL 稳定性 | 协议特征 | 重复度（缓存价值） |
+|---|---|---|---|---|---|
+| U1 | 静态归档下载（wget/curl tarball、bazel http_archive、cmake FetchContent URL 模式、模型权重、OBS 对象） | 单 GET | ref/内容寻址，A 类 | 无状态 | 高（CI 反复拉同一 ref） |
+| U2 | 包管理器（apt/yum/pip/npm/…） | 索引页 + 包文件 GET | 索引近实时、包内容寻址 | 无状态 | 高 |
+| U3 | git clone --depth=1（CI 源码拉取，本仓 03-github、op-plugin/mindspeed 全系 real-case） | GET info/refs + **POST** git-upload-pack | 分支/tag 可变（B 类） | **有状态协商** | 中（同 ref 会重复 clone） |
+| U4 | git fetch 增量 / submodule --recursive | 同 U3，多仓叠加 | 分支头移动 | 有状态 | 中 |
+| U5 | cmake FetchContent GIT_REPOSITORY 模式 | 同 U3 | tag 寻址 | 有状态 | 中 |
+| U6 | docker pull | registry v2 API + token auth + 302 CDN | digest 内容寻址 | host 绑定的认证流 | 高 |
+| U7 | huggingface resolve | 302 + 签名 CDN URL | 签名每次不同 | 签名与 host 绑定 | 高但**结构性不可缓存** |
+
+**关键分界**：U1/U2 是"同 URL 稳定复现"（换源+缓存都安全）；U3-U5 是"协议有状态"（换源必须保协议兼容，缓存恒 0%）；U6/U7 是"协议/签名绑定 host"（换源直接断认证/签名）。
+
+### 2. Squid 侧可用的拦截点（请求生命周期）
+
+一个请求穿过 Squid 时的全部可动手位置：
+
+| # | 拦截点 | 机制 | 生效时机 | 客户端可见 |
+|---|---|---|---|---|
+| M0 | **TLS 决策**（前置门槛） | `ssl_bump peek/bump/splice` | CONNECT 阶段 | 否 |
+| M1 | **请求改写（透明）** | `url_rewrite_program` 返回 `OK rewrite-url=...` | 缓存查找+回源之前 | 否（客户端以为还在和官方源说话） |
+| M2 | **请求改写（客户端跳转）** | 同 helper 返回 `302:URL`（Squid 4 起 `redirect_program` 已并入） | 收到请求即回 30x | 是（客户端自己决定是否跟随） |
+| M3 | **选路不改 URL** | `cache_peer`（parent）+ `dst/domain ACL` + `never_direct` | 回源选路时 | 否（URL、缓存键都不变） |
+| M4 | **响应改写** | ICAP / eCAP respmod（改 302 的 Location 等） | 响应回传时 | 半（跳转目标变了） |
+| — | ❌ 已移除 | `storeurl_*`（键与源分离）、`location_rewrite_program` | Squid 4+ 删除 | — |
+
+**M0 是最容易被忽略的前置约束**：`url_rewrite`/ICAP 只对 **bump 解密**的域名生效；生产是域名白名单 bump + 其余 **splice**——spliced 域名 Squid 只见 CONNECT 的 host，**路径不可见、不可改**。也就是说：想在 Squid 做 path 级换源，目标域必须进 bump 白名单（有隐私/合规代价），否则 M1-M4 全部失效，只剩 M3（隧道层选路）和 DNS 层。
+
+M3 的典型写法（换源但**不改缓存键**的唯一 Squid 内方案）：
+
+```squid
+# 把境外 git/归档流量交给一个"境内可达的 parent 代理"转发,URL 与缓存键不变
+cache_peer cn-parent parent 3130 0 no-query
+acl foreign_src dstdomain .github.com .codeload.github.com
+cache_peer_access cn-parent allow foreign_src
+never_direct allow foreign_src
+```
+
+⚠️ 两个硬约束：
+- parent 必须是**真正的正向代理**（能以绝对 URI 形式转发任意目标）。gh-proxy 这类 **URL 前缀反代不能直接当 parent**（它只会按前缀解析路径）。
+- parent 自身需要对上游可达——它解决的是"境内出口可达性"，不是"换镜像站"。
+
+### 3. 取舍矩阵（场景 × 机制）
+
+| 机制 | 缓存键 | git（U3-U5） | 302 链（U1 release/HF） | splice 域名 | 新故障点 | 客户端兼容面 |
+|---|---|---|---|---|---|---|
+| M1 rewrite-url（透明换源） | 变为新 URL，**旧缓存全作废** | ❌ 目标须支持 Smart HTTP（包镜像站不支持） | ❌ 只改首跳，后续 Location 仍指官方 CDN | ❌ 不可见 | helper + 新源 | 全兼容（客户端无感） |
+| M2 30x:URL（跳转） | 跟随后新 URL | ⚠️ git `http.followRedirects` 默认 `initial`，POST 阶段 302 会被拒 | 客户端各自处理（wget 默认跟、curl 需 -L、git 受限） | ❌ | helper + 新源 + **客户端行为差异** | 最差（每个客户端跟随策略不同） |
+| M3 cache_peer 路由 | **不变**（唯一保住旧缓存） | ✅ 只要 parent 能转发，协议原样过 | parent 层处理 | ✅ 隧道层仍可生效 | parent 代理 | 全兼容（客户端无感） |
+| M4 ICAP 改 Location | 不变（首跳缓存照旧） | 不适用（无 302） | ✅ 可把 CDN 域也指到境内 | ❌ 需解密 | ICAP 服务 | 较好 |
+| 客户端层换源（insteadOf/sed） | 变为新 URL | ✅ gh-proxy 兼容 git | gh-proxy 自处理 | 不涉及 | 镜像站 | 仅改到的 job |
+
+**基于矩阵的组合结论**：
+
+1. **U1/U2（大头流量）**：客户端/基镜像换源（M1 都不必用）→ Squid 照常缓存镜像站。缓存键换新是一次性成本，A 类源长缓存零风险，收益最大。
+2. **U3-U5（git）**：只有两条安全路径——客户端 `insteadOf`（现行方案）或 M3 parent 选路。M1 全局换源是明确反模式。
+3. **U6/U7**：换源即断（token realm / 签名与 host 绑定），Squid 层保持 splice/双轨（registry-proxy 按 digest 缓存）。
+4. **M2 是陷阱**：看似"最透明"（客户端自己跳），实际把行为差异下放给了每个客户端（wget 默认跟随、curl 要 -L、git 拒 POST 跳转、部分 pin 死 URL 的脚本直接拿 302 响应体当文件用）——CI 里工具五花八门，这是最难排障的一类故障。**一般不选**。
+5. **M3 是被低估的选项**：唯一"换源不动缓存键"的 Squid 内方案，且天然绕开 M0（splice 域名也能选路）。代价是 parent 必须是真代理且自身可达，还要为它做健康监控——适合"境内出口差但不想动客户端"的中期方案。
+6. **若真要 M1**：只按静态路径白名单（上文 config），并把新域名同步加进 bump 白名单 + 流量归因表——否则换源丢缓存（S7 场景）。
+
 ### 换源的缺点（无论哪层实现）
 
 1. **内容漂移与可复现性**
@@ -202,11 +270,24 @@ done
 - **步骤**：将 03/06/08/01 等工具用例中的换源注入抽成统一配方（基镜像或 postStart 公共脚本），全量重跑 `scripts/test-all.sh`（Compose 套件）或 16-tool 集群套件
 - **判定**：`jq -e '.all_passed' result.json` 为 true；流量报表域名归因表中新增镜像域名全部出现在 bump 白名单内（无 TCP_TUNNEL 漏网）
 
+### S11. M2 客户端跳转的跟随行为差异（验证：取舍矩阵"M2 是陷阱"）
+
+- **验证论点**：30x:URL 把跳转决策下放给客户端，各工具行为不一
+- **步骤**：测试 Squid helper 对某归档 URL 返回 `302:镜像URL`，同一 URL 分别用 wget、curl（不带 -L）、`pip download`、脚本内手写 http client 拉取
+- **判定**：wget 成功（默认跟随）；裸 curl 拿到 302 响应体（不是文件）；git 场景设 `http.followRedirects` 默认值时 POST 阶段 302 被拒——不同客户端结果不一致即证明该机制不可控
+
+### S12. M3 parent 选路原型（验证：取舍矩阵"M3 被低估"）
+
+- **验证论点**：cache_peer 换路不换缓存键，git 协议原样通过
+- **步骤**：测试环境加一个境内可达的 parent（如另一台 Squid/任意正向代理），按上文 `cache_peer` + `never_direct` 配置把 github 流量引过去；先正常 wget 填缓存 → 切 parent → 再 wget 同一 URL；同法 git clone
+- **判定**：切换后第二次 wget 仍 HIT（缓存键未变，对照 S6 的反例）；git clone 经 parent 成功（协议透传）；access.log 回源地址变为 parent
+- **注意**：gh-proxy 是 URL 前缀反代，不能当 parent——需先部署一个真正向代理（可用最简 Squid 实例）
+
 ### Review 优先级建议
 
 | 优先级 | 场景 | 理由 |
 |---|---|---|
 | P0 | S1、S9 | 已有现成用例，低成本复验核心结论 |
-| P1 | S2、S6、S7 | url_rewrite 兜底落地 + 缓存键/白名单两个最隐蔽的坑 |
-| P2 | S4、S5、S8 | 换源缺点的实证，可手动抽测 |
+| P1 | S2、S6、S7、S12 | url_rewrite 兜底落地 + 缓存键/白名单两个最隐蔽的坑 + M3 原型 |
+| P2 | S4、S5、S8、S11 | 换源缺点的实证 + M2 不可控性，可手动抽测 |
 | P3 | S3、S10 | 依赖外部时机/全量回归，按需安排 |
