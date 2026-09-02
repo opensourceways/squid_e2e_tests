@@ -16,9 +16,10 @@ Usage:
     ./analyze-domain-traffic.py --kubeconfig ~/.kube/gy-001.yaml -n squid --min-mb 5.0
 
 Output format:
-    Domain                                 MISS_Cnt   MISS_MB    HIT_Cnt    HIT_MB     Total_MB   Hit%
-    ===================================================================================================
-    pytorch-package.obs.cn-north-4...      10         1515.0     8          1298.7     2813.6     46.2%
+    Domain                                 MISS_Cnt   MISS_MB   ABORT_Cnt  ABORT_MB   HIT_Cnt    HIT_MB   REVAL_Cnt  REVAL_MB    Total_MB   EffHit%
+    ==========================================================================================================================================================
+    pytorch-package.obs.cn-north-4...      10         1515.0     0          0.0       8          1298.7    2          5.1        2818.7     46.2%
+    github.com                            54         65.5       3          0.0       0          0.0       0          0.0        65.5       0.0%
 """
 
 import argparse
@@ -58,23 +59,51 @@ def get_pods(kubeconfig: str, namespace: str, pods: str = None) -> List[str]:
 
 
 def fetch_access_log(kubeconfig: str, namespace: str, pod: str, container: str = 'squid') -> str:
-    """Fetch access.log from a squid pod"""
-    cmd = [
-        'kubectl', '--kubeconfig', kubeconfig,
-        'exec', '-n', namespace, pod,
-        '-c', container, '--',
-        'cat', '/var/log/squid/access.log'
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return result.stdout
+    """Fetch access.log from a squid pod.
+
+    大日志直接 `kubectl exec cat` 会在 exec stream 中途断开
+    ("read message: unexpected EOF")，导致日志被截断。
+    不同集群断流阈值差异很大：gy-001 实测 ~29MB 才断，wlcb-001 在 ~5MB
+    (约 40000+ 行) 就断。因此按行数分片拉取 (tail -n +START | head -n CHUNK)，
+    每片默认 20000 行 (~2.7MB) 留足余量；若某片仍被截断(非零退出码)，
+    自动缩小分片重试，直到成功或分片小于 1000 行。
+    """
+    log_path = '/var/log/squid/access.log'
+    chunk_lines = 20000
+    min_chunk_lines = 1000
+
+    def kexec(args: List[str]) -> str:
+        cmd = ['kubectl', '--kubeconfig', kubeconfig,
+               'exec', '-n', namespace, pod, '-c', container, '--'] + args
+        return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+
+    # 先拿总行数，用于分片
+    total_lines = int(kexec(['sh', '-c', 'wc -l < %s' % log_path]).strip().split()[0])
+
+    parts = []
+    start = 1
+    while start <= total_lines:
+        chunk = chunk_lines
+        while True:
+            try:
+                parts.append(kexec(['sh', '-c', 'tail -n +%d %s | head -n %d' % (start, log_path, chunk)]))
+                start += chunk
+                break
+            except subprocess.CalledProcessError:
+                # 当前分片被截断，缩小一半重试(截断的残片已被丢弃，不参与拼接)
+                chunk //= 2
+                if chunk < min_chunk_lines:
+                    raise
+    return ''.join(parts)
 
 
-def parse_access_log(log_content: str) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int], Dict[str, int], Dict[str, int], Dict[str, int]]:
+def parse_access_log(log_content: str) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int], Dict[str, int], Dict[str, int], Dict[str, int], Dict[str, int], Dict[str, int]]:
     """
     Parse squid access.log and extract per-domain statistics
     
     Returns:
-        (miss_bytes, miss_count, hit_bytes, hit_count, revalidated_bytes, revalidated_count)
+        (miss_bytes, miss_count, hit_bytes, hit_count, revalidated_bytes, revalidated_count,
+         aborted_bytes, aborted_count)
     """
     miss_bytes = defaultdict(int)
     miss_count = defaultdict(int)
@@ -82,6 +111,8 @@ def parse_access_log(log_content: str) -> Tuple[Dict[str, int], Dict[str, int], 
     hit_count = defaultdict(int)
     revalidated_bytes = defaultdict(int)
     revalidated_count = defaultdict(int)
+    aborted_bytes = defaultdict(int)
+    aborted_count = defaultdict(int)
     
     for line in log_content.splitlines():
         parts = line.split()
@@ -110,8 +141,14 @@ def parse_access_log(log_content: str) -> Tuple[Dict[str, int], Dict[str, int], 
         # TCP_HIT / TCP_MEM_HIT: direct cache hit (no origin contact)
         # TCP_MISS: cache miss (full object transfer from origin)
         # TCP_REFRESH_MISS / TCP_REFRESH_MODIFIED: revalidation miss (object changed, full transfer)
+        # TCP_*_ABORTED: client/network aborted the transfer - NOT a real miss or hit,
+        #   size 通常为 0（或 abort 前已传的少量字节），单独统计避免污染 MISS/HIT
         
-        if 'TCP_REFRESH_UNMODIFIED' in status or 'TCP_REFRESH_HIT' in status:
+        if 'ABORTED' in status:
+            # 传输被客户端/网络中断：既不是有效 miss 也不是 hit，单独归类
+            aborted_bytes[domain] += size
+            aborted_count[domain] += 1
+        elif 'TCP_REFRESH_UNMODIFIED' in status or 'TCP_REFRESH_HIT' in status:
             # Revalidation hit - object served from cache after 304 response
             # Count the full object size (what client received) but mark as revalidated
             revalidated_bytes[domain] += size
@@ -125,10 +162,11 @@ def parse_access_log(log_content: str) -> Tuple[Dict[str, int], Dict[str, int], 
             miss_bytes[domain] += size
             miss_count[domain] += 1
     
-    return miss_bytes, miss_count, hit_bytes, hit_count, revalidated_bytes, revalidated_count
+    return (miss_bytes, miss_count, hit_bytes, hit_count,
+            revalidated_bytes, revalidated_count, aborted_bytes, aborted_count)
 
 
-def merge_stats(all_stats: List[Tuple]) -> Tuple[Dict, Dict, Dict, Dict, Dict, Dict]:
+def merge_stats(all_stats: List[Tuple]) -> Tuple[Dict, Dict, Dict, Dict, Dict, Dict, Dict, Dict]:
     """Merge statistics from multiple pods"""
     merged_miss_bytes = defaultdict(int)
     merged_miss_count = defaultdict(int)
@@ -136,8 +174,10 @@ def merge_stats(all_stats: List[Tuple]) -> Tuple[Dict, Dict, Dict, Dict, Dict, D
     merged_hit_count = defaultdict(int)
     merged_revalidated_bytes = defaultdict(int)
     merged_revalidated_count = defaultdict(int)
+    merged_aborted_bytes = defaultdict(int)
+    merged_aborted_count = defaultdict(int)
     
-    for miss_bytes, miss_count, hit_bytes, hit_count, revalidated_bytes, revalidated_count in all_stats:
+    for miss_bytes, miss_count, hit_bytes, hit_count, revalidated_bytes, revalidated_count, aborted_bytes, aborted_count in all_stats:
         for domain, value in miss_bytes.items():
             merged_miss_bytes[domain] += value
         for domain, value in miss_count.items():
@@ -150,24 +190,31 @@ def merge_stats(all_stats: List[Tuple]) -> Tuple[Dict, Dict, Dict, Dict, Dict, D
             merged_revalidated_bytes[domain] += value
         for domain, value in revalidated_count.items():
             merged_revalidated_count[domain] += value
+        for domain, value in aborted_bytes.items():
+            merged_aborted_bytes[domain] += value
+        for domain, value in aborted_count.items():
+            merged_aborted_count[domain] += value
     
     return (merged_miss_bytes, merged_miss_count, merged_hit_bytes, merged_hit_count,
-            merged_revalidated_bytes, merged_revalidated_count)
+            merged_revalidated_bytes, merged_revalidated_count,
+            merged_aborted_bytes, merged_aborted_count)
 
 
 def format_report(miss_bytes: Dict, miss_count: Dict, hit_bytes: Dict, hit_count: Dict,
                   revalidated_bytes: Dict, revalidated_count: Dict,
+                  aborted_bytes: Dict, aborted_count: Dict,
                   min_mb: float = 0.0, max_rows: int = 50) -> str:
     """Format analysis results as a table"""
     results = []
     
-    all_domains = set(list(miss_bytes.keys()) + list(hit_bytes.keys()) + list(revalidated_bytes.keys()))
+    all_domains = set(list(miss_bytes.keys()) + list(hit_bytes.keys()) + list(revalidated_bytes.keys()) + list(aborted_bytes.keys()))
     
     for domain in all_domains:
         miss_mb = miss_bytes[domain] / 1048576.0
         hit_mb = hit_bytes[domain] / 1048576.0
         reval_mb = revalidated_bytes[domain] / 1048576.0
-        total_mb = miss_mb + hit_mb + reval_mb
+        abort_mb = aborted_bytes[domain] / 1048576.0
+        total_mb = miss_mb + hit_mb + reval_mb + abort_mb
         
         if total_mb < min_mb:
             continue
@@ -177,7 +224,8 @@ def format_report(miss_bytes: Dict, miss_count: Dict, hit_bytes: Dict, hit_count
         effective_hit_mb = hit_mb + reval_mb
         effective_hit_ratio = (effective_hit_mb * 100.0 / total_mb) if total_mb > 0 else 0
         
-        results.append((total_mb, domain, miss_count[domain], miss_mb, 
+        results.append((total_mb, domain, miss_count[domain], miss_mb,
+                       aborted_count[domain], abort_mb,
                        hit_count[domain], hit_mb,
                        revalidated_count[domain], reval_mb,
                        effective_hit_ratio))
@@ -185,18 +233,19 @@ def format_report(miss_bytes: Dict, miss_count: Dict, hit_bytes: Dict, hit_count
     results.sort(reverse=True)
     
     lines = []
-    lines.append(f'{"Domain":<50}{"MISS_Cnt":>9}{"MISS_MB":>10}{"HIT_Cnt":>9}{"HIT_MB":>10}{"REVAL_Cnt":>10}{"REVAL_MB":>10}{"Total_MB":>10}{"EffHit%":>8}')
-    lines.append('=' * 126)
+    lines.append(f'{"Domain":<50}{"MISS_Cnt":>9}{"MISS_MB":>10}{"ABORT_Cnt":>10}{"ABORT_MB":>10}{"HIT_Cnt":>9}{"HIT_MB":>10}{"REVAL_Cnt":>10}{"REVAL_MB":>10}{"Total_MB":>10}{"EffHit%":>8}')
+    lines.append('=' * 146)
     
-    for total_mb, domain, m_cnt, m_mb, h_cnt, h_mb, r_cnt, r_mb, eff_ratio in results[:max_rows]:
-        lines.append(f'{domain:<50}{m_cnt:>9}{m_mb:>10.1f}{h_cnt:>9}{h_mb:>10.1f}'
-                    f'{r_cnt:>10}{r_mb:>10.1f}{total_mb:>10.1f}{eff_ratio:>8.1f}')
+    for total_mb, domain, m_cnt, m_mb, a_cnt, a_mb, h_cnt, h_mb, r_cnt, r_mb, eff_ratio in results[:max_rows]:
+        lines.append(f'{domain:<50}{m_cnt:>9}{m_mb:>10.1f}{a_cnt:>10}{a_mb:>10.1f}'
+                    f'{h_cnt:>9}{h_mb:>10.1f}{r_cnt:>10}{r_mb:>10.1f}{total_mb:>10.1f}{eff_ratio:>8.1f}')
     
     # Summary
     total_miss = sum(miss_bytes.values()) / 1048576.0
     total_hit = sum(hit_bytes.values()) / 1048576.0
     total_reval = sum(revalidated_bytes.values()) / 1048576.0
-    total_all = total_miss + total_hit + total_reval
+    total_abort = sum(aborted_bytes.values()) / 1048576.0
+    total_all = total_miss + total_hit + total_reval + total_abort
     
     # Effective hit ratio includes revalidated (saved bandwidth)
     effective_hit = total_hit + total_reval
@@ -212,6 +261,7 @@ def format_report(miss_bytes: Dict, miss_count: Dict, hit_bytes: Dict, hit_count
     lines.append(f'Total MISS:        {total_miss:.1f} MB ({sum(miss_count.values())} requests)')
     lines.append(f'Total HIT:         {total_hit:.1f} MB ({sum(hit_count.values())} requests)')
     lines.append(f'Total REVALIDATED: {total_reval:.1f} MB ({sum(revalidated_count.values())} requests, ~304 overhead)')
+    lines.append(f'Total ABORTED:     {total_abort:.1f} MB ({sum(aborted_count.values())} requests, client/network aborted - not real traffic)')
     lines.append(f'Total Traffic:     {total_all:.1f} MB')
     lines.append(f'')
     lines.append(f'Effective Hit Ratio (HIT + REVAL):  {effective_hit_ratio:.1f}%')
@@ -219,6 +269,7 @@ def format_report(miss_bytes: Dict, miss_count: Dict, hit_bytes: Dict, hit_count
     lines.append(f'')
     lines.append(f'Note: REVALIDATED = TCP_REFRESH_UNMODIFIED (304 Not Modified from origin)')
     lines.append(f'      Client received full object from cache, origin only sent 304 header')
+    lines.append(f'      ABORTED = TCP_*_ABORTED, size 为 abort 前已传字节(通常 0)，不计入 HIT/MISS')
     
     return '\n'.join(lines)
 
@@ -265,11 +316,13 @@ def main():
             return 1
         
         # Merge stats
-        miss_bytes, miss_count, hit_bytes, hit_count, revalidated_bytes, revalidated_count = merge_stats(all_stats)
+        miss_bytes, miss_count, hit_bytes, hit_count, revalidated_bytes, revalidated_count, aborted_bytes, aborted_count = merge_stats(all_stats)
         
         # Format report
-        report = format_report(miss_bytes, miss_count, hit_bytes, hit_count, 
-                              revalidated_bytes, revalidated_count, args.min_mb, args.max_rows)
+        report = format_report(miss_bytes, miss_count, hit_bytes, hit_count,
+                              revalidated_bytes, revalidated_count,
+                              aborted_bytes, aborted_count,
+                              args.min_mb, args.max_rows)
         
         # Output
         if args.output:

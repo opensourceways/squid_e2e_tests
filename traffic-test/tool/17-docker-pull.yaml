@@ -1,0 +1,163 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: test-squid-dockerpull-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-squid-dockerpull
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 1800
+  tasks:
+    - name: test-squid-dockerpull
+      replicas: 1
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              # 标准 DinD 镜像。gy-006 直连 registry-1.docker.io 超时（实测 i/o timeout），
+              # 必须走 daocloud 加速源 m.daocloud.io/docker.io/...（集群已在用的方式）。
+              # 注意 dind 是 Alpine，脚本用 POSIX sh。
+              image: m.daocloud.io/docker.io/library/docker:27.3.1-dind
+              command:
+                - /bin/sh
+                - -c
+              args:
+                - |
+                  #!/bin/sh
+                  set -e
+
+                  # docker pull 走 squid 验证用例（gy-006）：
+                  #   dockerd 经 HTTPS_PROXY 走 squid → 对 swr.* 域名 splice →
+                  #   registry-proxy (rpardini) 用共享 squid CA 做 MITM，按 digest 缓存 blob。
+                  #   dockerd 必须信任 squid CA（SSL_CERT_FILE），否则 MITM 证书校验失败。
+                  #   squid 变体: pull#1 冷 MISS 填充缓存 → rmi 清本地层 → pull#2 命中缓存（DURATION）
+                  #   direct 变体: PROXY= 为空 → dockerd 直连 SWR（无缓存）（DURATION 用于对比）
+                  PROXY=http://squid-cache.squid.svc.cluster.local:3128
+                  IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:8.2.rc1-910b-ubuntu22.04-py3.11
+                  CA_FILE=/etc/squid-ca/squid-ca.pem
+
+                  echo ""
+                  echo "=========================================="
+                  echo "Scenario 17: docker pull (registry-proxy blob cache)"
+                  echo "=========================================="
+                  echo "arch=$(uname -m)  image=$IMAGE"
+                  echo "proxy=${PROXY:-<direct>}"
+
+                  # 只有走代理（squid 变体）才注入 squid CA；direct 直连用系统 CA 验 SWR 真实证书
+                  if [ -n "$PROXY" ]; then
+                    SSL_ARG="SSL_CERT_FILE=$CA_FILE"
+                  else
+                    SSL_ARG=""
+                  fi
+
+                  echo "--- starting dockerd ---"
+                  mkdir -p /var/log/docker
+                  nohup env HTTP_PROXY="$PROXY" HTTPS_PROXY="$PROXY" \
+                    http_proxy="$PROXY" https_proxy="$PROXY" \
+                    NO_PROXY="localhost,127.0.0.1,::1" no_proxy="localhost,127.0.0.1,::1" \
+                    $SSL_ARG \
+                    dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 \
+                    >/var/log/docker/dockerd.log 2>&1 &
+                  i=0
+                  while [ $i -lt 60 ]; do
+                    docker info >/dev/null 2>&1 && break
+                    sleep 2; i=$((i+1))
+                  done
+                  if ! docker info >/dev/null 2>&1; then
+                    echo "dockerd FAILED:"; tail -40 /var/log/docker/dockerd.log; exit 1
+                  fi
+                  echo "dockerd ready"
+
+                  T_START=$(date +%s)
+
+                  # 阶段 1/3：冷拉取 —— 唯一一次回源下载（MISS），填充 registry-proxy 缓存。
+                  # （若缓存里已有该镜像 blob，则本次即命中缓存，后续同理命中——缓存持久性）
+                  echo "--- [1/3] cold pull: fill registry-proxy cache (回源下载仅此一次) ---"
+                  docker pull "$IMAGE" >/tmp/pull1.log 2>&1
+                  tail -25 /tmp/pull1.log
+
+                  # 阶段 2/3：删除本地镜像层（确保真正走网络/缓存），再 pull 一次 → 应 HIT 缓存、无回源
+                  echo "--- [2/3] test pull #2: 应命中缓存 (无回源下载) ---"
+                  docker rmi "$IMAGE" >/dev/null 2>&1 || true
+                  P2_START=$(date +%s)
+                  docker pull "$IMAGE" >/tmp/pull2.log 2>&1
+                  P2_END=$(date +%s)
+                  tail -25 /tmp/pull2.log
+                  echo "PULL2: $((P2_END - P2_START))s"
+
+                  # 阶段 3/3：再重复一次，验证缓存命中稳定（下载次数不增加）
+                  echo "--- [3/3] test pull #3: 再次命中缓存 (无回源下载) ---"
+                  docker rmi "$IMAGE" >/dev/null 2>&1 || true
+                  P3_START=$(date +%s)
+                  docker pull "$IMAGE" >/tmp/pull3.log 2>&1
+                  P3_END=$(date +%s)
+                  tail -25 /tmp/pull3.log
+                  echo "PULL3: $((P3_END - P3_START))s"
+
+                  echo "--- verify image present ---"
+                  docker images | grep ascend-ci/cann || true
+
+                  T_END=$(date +%s)
+                  echo ""
+                  echo "=========================================="
+                  echo "DURATION: $((T_END - T_START))s   (下载仅第一次发生, 后两次 PULL2/PULL3 应稳定命中缓存)"
+                  echo "✅ Scenario 17 completed."
+                  echo "=========================================="
+              resources:
+                limits:
+                  cpu: "4"
+                  memory: 8Gi
+                requests:
+                  cpu: "4"
+                  memory: 8Gi
+              env:
+                - name: HTTP_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: HTTPS_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: http_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: https_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: NO_PROXY
+                  value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+                - name: no_proxy
+                  value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+                - name: docker-config
+                  mountPath: /root/.docker
+              securityContext:
+                privileged: true
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true
+            - name: docker-config
+              secret:
+                secretName: huawei-swr-image-pull-secret-model-gy
+                items:
+                  - key: .dockerconfigjson
+                    path: config.json
+          nodeSelector:
+            kubernetes.io/arch: arm64
+          imagePullSecrets:
+            - name: huawei-swr-image-pull-secret-model-gy
+          activeDeadlineSeconds: 3600
+          securityContext:
+            runAsUser: 0
+          restartPolicy: Never

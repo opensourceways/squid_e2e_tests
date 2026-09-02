@@ -2,6 +2,8 @@ configs/certs/*.pem
 configs/certs/*.crt
 test-report.txt
 result.json
+RECSDK-BUILD/
+**/__pycache__/
 k8s/*.csv
 buildkit/src/
 .metrics-state

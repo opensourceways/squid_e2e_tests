@@ -1,36 +1,54 @@
-Domain                                             MISS_Cnt   MISS_MB  HIT_Cnt    HIT_MB REVAL_Cnt  REVAL_MB  Total_MB EffHit%
-==============================================================================================================================
-mindcluster.obs.cn-north-4.myhuaweicloud.com           4974   12359.9      193   75044.0         4    3401.2   90805.2    86.4
-repo.huaweicloud.com                                    367     394.6      898   10987.9       905     854.6   12237.1    96.8
-pytorch-package.obs.cn-north-4.myhuaweicloud.com         19     783.2       94    8636.9        20     902.9   10322.9    92.4
-ports.ubuntu.com                                         63      77.1      410     517.6      2023    4919.1    5513.8    98.6
-mirrors.tuna.tsinghua.edu.cn                             54      88.5     5344    4115.7       169     177.1    4381.4    98.0
-lfs-cdn.gitcode.com                                      93    2861.8        0       0.0         0       0.0    2861.8     0.0
-mirrors.huaweicloud.com                                 905     397.1      571    2018.2         0       0.0    2415.3    83.6
-mindx-package.obs.cn-north-4.myhuaweicloud.com         1313    1949.3       28       5.0        39       7.1    1961.3     0.6
-mirrors.aliyun.com                                       41      36.2      154     331.1       640     736.3    1103.7    96.7
-squid-cache                                          179048     479.5        0       0.0         0       0.0     479.5     0.0
-archive.ubuntu.com                                       18      28.1       10       1.7       112     301.9     331.8    91.5
-files.pythonhosted.org                                    0       0.0      324     129.0         0       0.0     129.0   100.0
-security.ubuntu.com                                      10      17.4        0       0.0        40     111.0     128.4    86.4
-mindstudio-pkg.obs.cn-north-4.myhuaweicloud.com           0       0.0        2     111.4         0       0.0     111.4   100.0
-pypi.tuna.tsinghua.edu.cn                                 0       0.0       58      45.3        58      31.3      76.6   100.0
-mindie-pr.obs.cn-north-4.myhuaweicloud.com               66      23.3        0       0.0        16       9.6      32.9    29.1
-gitcode.com                                             145      26.3        0       0.0         0       0.0      26.3     0.0
-10.0.0.1                                               8043      12.6        0       0.0         0       0.0      12.6     0.0
-obs-community.obs.cn-north-1.myhuaweicloud.com            1       4.1        1       4.1         0       0.0       8.2    50.0
-pypi.org                                                  0       0.0        0       0.0       324       6.6       6.6   100.0
-release-assets.githubusercontent.com                      9       3.4        0       0.0         0       0.0       3.4     0.0
-[2001                                                   671       1.1        0       0.0         0       0.0       1.1     0.0
+Domain                                             MISS_Cnt   MISS_MB ABORT_Cnt  ABORT_MB  HIT_Cnt    HIT_MB REVAL_Cnt  REVAL_MB  Total_MB EffHit%
+==================================================================================================================================================
+mindcluster.obs.cn-north-4.myhuaweicloud.com          11963   17697.2         0       0.0      916  505375.6        17   12831.1  535903.8    96.7
+pytorch-package.obs.cn-north-4.myhuaweicloud.com      13853   80833.8         0       0.0     3242  372454.3        48    2709.0  455997.1    82.3
+mindie-pr.obs.cn-north-4.myhuaweicloud.com              572  154326.4         0       0.0       99   41939.2        72      41.3  196306.9    21.4
+repo.huaweicloud.com                                   6268    4878.3         0       0.0    77511   61820.8     27468   21371.1   88070.3    94.5
+mirrors.huaweicloud.com                               13985    4105.5         0       0.0    25413   29291.3       716    1234.8   34631.5    88.1
+pta-pr.obs.cn-north-4.myhuaweicloud.com                 541   11120.2         0       0.0      823    9755.0        74    1237.0   22112.2    49.7
+cdn-lfs-cn-1.modelscope.cn                                7   16733.0         0       0.0        0       0.0         0       0.0   16733.0     0.0
+gitcode.com                                            3940   15949.4         0       0.0        0       0.0         0       0.0   15949.4     0.0
+lfs-cdn.gitcode.com                                   63008   13103.0         0       0.0        0       0.0         0       0.0   13103.0     0.0
+mirrors.tuna.tsinghua.edu.cn                            139     201.6         0       0.0    13300   10346.2       602     729.8   11277.7    98.2
+ports.ubuntu.com                                        215     288.0         1       0.0     1283    1649.3      3941    8673.3   10610.6    97.3
+mindx-package.obs.cn-north-4.myhuaweicloud.com         2541    6797.7         0       0.0      139    1845.4       145    1291.5    9934.6    31.6
+mirrors.aliyun.com                                      339    1123.1         0       0.0     2437    6637.0      3560    1278.2    9038.3    87.6
+download-r2.pytorch.org                                  20     326.9         0       0.0      174    5020.6        23       0.4    5348.0    93.9
+repo.mindspore.cn                                        22     204.9         0       0.0       47    3582.5         9     204.7    3992.1    94.9
+get.helm.sh                                               4      63.6         0       0.0      243    3860.7         0       0.0    3924.3    98.4
+devrepo.devcloud.cn-north-4.huaweicloud.com              68    3739.0         0       0.0        0       0.0         0       0.0    3739.0     0.0
+repo.oepkgs.net                                           3     170.4         0       0.0       53    3010.4         0       0.0    3180.8    94.6
+archive.ubuntu.com                                      111     173.4         0       0.0      701     913.6       565    1136.6    2223.7    92.2
+openlibing-codeql.obs.cn-southwest-2.myhuaweicloud.com        2    1080.0         0       0.0        2    1080.0         0       0.0    2160.1    50.0
+codeload.github.com                                       6     269.9         0       0.0       50    1368.2         0       0.0    1638.1    83.5
+ascend-cann-open.obs.cn-north-4.myhuaweicloud.com       388    1113.8         0       0.0        0       0.0         0       0.0    1113.8     0.0
+repo.openeuler.org                                       92     251.5         0       0.0      111     628.3         0       0.0     879.8    71.4
+squid-cache                                          316706     849.1        40       0.0        0       0.0         0       0.0     849.1     0.0
+files.pythonhosted.org                                   69     507.1         3       5.8      451     325.7         0       0.0     838.6    38.8
+security.ubuntu.com                                      38      59.2         0       0.0        0       0.0       260     698.9     758.1    92.2
+pypi.tuna.tsinghua.edu.cn                                16       4.9         0       0.0      491     287.8       248      84.8     377.5    98.7
+gh-proxy.test.osinfra.cn                                102     333.8         0       0.0        0       0.0         0       0.0     333.8     0.0
+download.pytorch.org                                    801     187.6         5       0.9       33      28.6        53       1.0     218.1    13.6
+github.com                                              137     162.4        14       0.0        0       0.0         0       0.0     162.4     0.0
+mindstudio-pkg.obs.cn-north-4.myhuaweicloud.com           0       0.0         0       0.0        2     111.4         0       0.0     111.4   100.0
+10.0.0.1                                                  0       0.0     19090      29.9        0       0.0         0       0.0      29.9     0.0
+data.pyg.org                                             12       3.6         0       0.0       45      20.5        23       0.0      24.2    85.2
+release-assets.githubusercontent.com                     39      14.6         0       0.0        7       2.6         0       0.0      17.2    15.2
+pypi.org                                                 33       2.9         0       0.0        0       0.0       425      11.5      14.4    79.9
+sum.golang.google.cn                                    794       4.6         0       0.0      848       5.1         0       0.0       9.7    52.3
+obs-community.obs.cn-north-1.myhuaweicloud.com            1       4.1         0       0.0        1       4.1         0       0.0       8.2    50.0
+[2001                                                     0       0.0      1594       2.5        0       0.0         0       0.0       2.5     0.0
 
 --- Summary ---
-Total MISS:        19544.0 MB (196833 requests)
-Total HIT:         101947.9 MB (8087 requests)
-Total REVALIDATED: 11458.7 MB (4350 requests, ~304 overhead)
-Total Traffic:     132950.6 MB
+Total MISS:        336685.7 MB (437894 requests)
+Total HIT:         1061364.3 MB (128422 requests)
+Total REVALIDATED: 53535.2 MB (38249 requests, ~304 overhead)
+Total ABORTED:     39.2 MB (23190 requests, client/network aborted - not real traffic)
+Total Traffic:     1451624.4 MB
 
-Effective Hit Ratio (HIT + REVAL):  85.3%
-Origin Bandwidth Saved:             85.3%
+Effective Hit Ratio (HIT + REVAL):  76.8%
+Origin Bandwidth Saved:             76.8%
 
 Note: REVALIDATED = TCP_REFRESH_UNMODIFIED (304 Not Modified from origin)
       Client received full object from cache, origin only sent 304 header
+      ABORTED = TCP_*_ABORTED, size 为 abort 前已传字节(通常 0)，不计入 HIT/MISS

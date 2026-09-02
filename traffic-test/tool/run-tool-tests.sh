@@ -34,12 +34,12 @@ fail() { echo -e "  ${RED}❌ $*${RESET}"; }
 info() { echo -e "  ${CYAN}$*${RESET}"; }
 
 # ── config ────────────────────────────────────────────────────────────────
-ALL_CASES=(01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16)
+ALL_CASES=(01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17)
 declare -A CASE_DESC=(
   [01]="pip"  [02]="apt" [03]="git clone" [04]="go mod" [05]="obsutil"
   [06]="wget/curl" [07]="cmake FetchContent" [08]="bazel" [09]="npm"
   [10]="cargo" [11]="conda" [12]="uv" [13]="huggingface_hub" [14]="git-lfs" [15]="pnpm"
-  [16]="yum/dnf"
+  [16]="yum/dnf" [17]="docker pull"
 )
 
 PARALLEL=0

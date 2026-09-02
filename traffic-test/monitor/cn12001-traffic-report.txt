@@ -1,0 +1,25 @@
+Domain                                             MISS_Cnt   MISS_MB  HIT_Cnt    HIT_MB REVAL_Cnt  REVAL_MB  Total_MB EffHit%
+==============================================================================================================================
+obs.cn-north-12.myhuaweicloud.com                       349  238366.8        0       0.0         0       0.0  238366.8     0.0
+gh-proxy.test.osinfra.cn                                211    2932.0        0       0.0         0       0.0    2932.0     0.0
+security.ubuntu.com                                      37      68.5        0       0.0       158     432.4     500.9    86.3
+squid-cache                                           74069     196.1        0       0.0         0       0.0     196.1     0.0
+dl-cdn.openeuler.openatom.cn                             75      97.5       36      82.2         0       0.0     179.7    45.8
+pypi.org                                                 12     169.9        1       0.0         0       0.0     169.9     0.0
+ports.ubuntu.com                                         66      74.8        0       0.0        18      45.3     120.1    37.7
+archive.ubuntu.com                                       61      62.9        0       0.0        13      33.0      96.0    34.4
+obs-community.obs.cn-north-1.myhuaweicloud.com            4      17.1        4      17.1         0       0.0      34.3    50.0
+ascend-artifcat-packages.obs.cn-north-4.myhuaweicloud.com      220       1.7        0       0.0         0       0.0       1.7     0.0
+swr.cn-north-12.myhuaweicloud.com                       626       0.9        0       0.0         0       0.0       0.9     0.0
+
+--- Summary ---
+Total MISS:        241989.0 MB (76931 requests)
+Total HIT:         99.4 MB (41 requests)
+Total REVALIDATED: 510.7 MB (189 requests, ~304 overhead)
+Total Traffic:     242599.1 MB
+
+Effective Hit Ratio (HIT + REVAL):  0.3%
+Origin Bandwidth Saved:             0.3%
+
+Note: REVALIDATED = TCP_REFRESH_UNMODIFIED (304 Not Modified from origin)
+      Client received full object from cache, origin only sent 304 header

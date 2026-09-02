@@ -1,15 +1,26 @@
-Domain                                             MISS_Cnt   MISS_MB  HIT_Cnt    HIT_MB REVAL_Cnt  REVAL_MB  Total_MB EffHit%
-==============================================================================================================================
-squid-cache                                          178926     476.1        0       0.0         0       0.0     476.1     0.0
+Domain                                             MISS_Cnt   MISS_MB ABORT_Cnt  ABORT_MB  HIT_Cnt    HIT_MB REVAL_Cnt  REVAL_MB  Total_MB EffHit%
+==================================================================================================================================================
+pytorch-package.obs.cn-north-4.myhuaweicloud.com         30    2101.4         0       0.0      899   70236.6         0       0.0   72338.0    97.1
+pta-pr.obs.cn-north-4.myhuaweicloud.com                 607   11661.8         0       0.0      971   12628.4       109    1887.1   26177.2    55.5
+mirrors.huaweicloud.com                                7070    1744.8         0       0.0     6090   21511.5         0       0.0   23256.4    92.5
+download-r2.pytorch.org                                  23     613.7         0       0.0      167    9051.9        24       0.5    9666.1    93.7
+repo.mindspore.cn                                        27     204.9         0       0.0       64    4810.8        11     204.7    5220.5    96.1
+repo.oepkgs.net                                           4     227.2         0       0.0       76    4316.7         0       0.0    4543.9    95.0
+lfs-cdn.gitcode.com                                   20170    1499.6         0       0.0        0       0.0         0       0.0    1499.6     0.0
+squid-cache                                          316558     844.4         0       0.0        0       0.0         0       0.0     844.4     0.0
+download.pytorch.org                                    125     287.6         3       0.3       26     413.4        10       3.4     704.7    59.1
+data.pyg.org                                             14       4.2         0       0.0       32      17.9        28       0.0      22.1    81.2
 
 --- Summary ---
-Total MISS:        476.1 MB (178926 requests)
-Total HIT:         0.0 MB (0 requests)
-Total REVALIDATED: 0.0 MB (0 requests, ~304 overhead)
-Total Traffic:     476.1 MB
+Total MISS:        19189.6 MB (344759 requests)
+Total HIT:         122987.4 MB (8325 requests)
+Total REVALIDATED: 2095.7 MB (182 requests, ~304 overhead)
+Total ABORTED:     0.3 MB (3 requests, client/network aborted - not real traffic)
+Total Traffic:     144273.0 MB
 
-Effective Hit Ratio (HIT + REVAL):  0.0%
-Origin Bandwidth Saved:             0.0%
+Effective Hit Ratio (HIT + REVAL):  86.7%
+Origin Bandwidth Saved:             86.7%
 
 Note: REVALIDATED = TCP_REFRESH_UNMODIFIED (304 Not Modified from origin)
       Client received full object from cache, origin only sent 304 header
+      ABORTED = TCP_*_ABORTED, size 为 abort 前已传字节(通常 0)，不计入 HIT/MISS
