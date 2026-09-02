@@ -1,0 +1,31 @@
+domaintest/.gitignore
+  s_eb9afb2911f2fe::t_87592dc2d5e893 1-6
+domaintest/REPORT-x20.md
+  s_eb9afb2911f2fe::t_9825e750d46ff9 1-158
+domaintest/REPORT.md
+  s_eb9afb2911f2fe::t_9804321f3e4465 1-140
+domaintest/ascend_ci_domains.json
+  s_eb9afb2911f2fe::t_257123b5005f2c 1-98
+domaintest/test-domains-x20.sh
+  s_eb9afb2911f2fe::t_e839dd5321e46f 1-52
+domaintest/test-domains.sh
+  s_eb9afb2911f2fe::t_7d770634c1bb60 1-91
+domaintest/x20-remote.sh
+  s_eb9afb2911f2fe::t_3622c6d76c4e8a 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "722e8d8ac8b9c1282f249600430ad83ecce4e82c",
+  "prompts": {},
+  "sessions": {
+    "s_eb9afb2911f2fe": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a96999a2397bca1f9dfeb6d",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>"
+    }
+  }
+}
