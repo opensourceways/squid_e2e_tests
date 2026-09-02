@@ -123,3 +123,90 @@ done
 | Squid url_rewrite | **只作兜底**：仅对改不了的第三方 CI 脚本按静态路径白名单局部启用，绝不全局开 | — |
 
 **一句话总结**：换源的正确位置是"发起请求的那一端"，Squid 的价值是"不管源在哪都缓存住"。让 Squid 做缓存的事、让客户端做选源的事，别让 Squid 既当裁判又当运动员。
+
+---
+
+## 场景验证清单（Review 本文档用）
+
+以下场景用于逐条验证上文的结论。每个场景标注了它验证的论点、操作步骤与机器可判定标准。
+测试集群参考现有 16-tool e2e 套件的写法（Volcano Job + squid CA secret + 代理 env 注入）。
+
+### S1. git clone 经 Squid 命中率恒 0%（验证：POST 协议级不可缓存）
+
+- **验证论点**：话题一"根因是 POST /git-upload-pack 不可缓存，与是否换源无关"
+- **步骤**：复用 `traffic-test/tool/03-github.yaml`（insteadOf gh-proxy + depth=1），连跑 2 次 job；第二次拉同一仓库
+- **判定**：两次 access.log 中 `github.com`/gh-proxy 域名均为 `TCP_MISS`/直接回源，`registry_proxy_http_hits_total` 不增长；但第二次 DURATION 明显更快（带宽差异而非缓存）
+- **反例对照**：同 job 内 wget 一个 codeload tarball 两次 → 第二次应 HIT（证明 Squid 本身工作正常，差异确实来自协议）
+
+### S2. url_rewrite 白名单原型：静态路径重写、git 路径放行（验证：方案 B 可行性）
+
+- **验证论点**：话题一方案 B + 话题二"只对静态路径白名单替换"
+- **步骤**：测试环境 Squid 配置上文 helper + `url_rewrite_access` 白名单（仅 `\.tar\.gz$` 等归档 + codeload/github 域名）
+  1. `wget https://github.com/<repo>/archive/v1.0.tar.gz` → 应被重写到 gh-proxy 且成功
+  2. `git clone https://github.com/<repo>.git`（不设 insteadOf，直走 Squid）→ `/info/refs`、`/git-upload-pack` 不进 helper，原样直连 GitHub 成功
+- **判定**：cache.log 中重写只出现在归档 URL；git clone 全程无重写记录；两个操作都 exit 0
+- **注意**：helper 处理需在超时预算内（Squid 默认对 rewrite helper 有超时），并发拉取时观察 `url_rewrite_children` 是否打满
+
+### S3. 镜像同步延迟导致的新版本 404（验证：内容漂移缺点 1）
+
+- **验证论点**：话题二"镜像同步有延迟 → 刚发布的版本 404"
+- **步骤**：挑一个高频更新的包索引（如 pypi 某刚发版的小包），分别在官方源与国内镜像上查询同版本
+- **判定**：官方源 200 而镜像 404（窗口期内），记录延迟时长；超窗口后镜像侧变 200。此场景难以在 CI 内自动化定时复现，可手动抽测并记录
+- **变体**：`pip download <pkg> --no-deps -d /tmp` 分别走官方/镜像，对比版本可用性
+
+### S4. hash 锁定在镜像上的兼容性（验证：缺点 1 的零容忍面）
+
+- **验证论点**：话题二"pip --require-hashes / go.sum 对重打包零容忍"
+- **步骤**：在 gy-006 用 `pip install --require-hashes -r <锁定文件>`（走 Squid → 镜像）；同法跑 `go mod download`（go.sum 校验）
+- **判定**：exit 0 且下载全走镜像域名。若镜像重打包/重压缩过，hash 校验会直接失败——失败即证明该缺点存在
+- **预填缓存对照**：第二次跑同 job，验证镜像流量被 Squid 正常缓存（HIT），即"客户端换源 + Squid 缓存镜像站"组合成立
+
+### S5. GitHub release 302 后跳绕过镜像（验证：缺点 3）
+
+- **验证论点**：话题二"首跳换了，Location 指向官方 CDN，大文件实际仍走境外"
+- **步骤**：在测试 job 中 `curl -sIL` 一个 GitHub release asset，观察重定向链；再通过启用了 url_rewrite 的 Squid 实际下载该 asset
+- **判定**：重定向链含 `objects.githubusercontent.com`；url_rewrite 对 302 的 Location 无能为力（access.log 显示后续请求仍是官方 CDN 域名），境外带宽未被省下
+- **对照**：改用 codeload 归档（无 302）→ 重写生效，走 gh-proxy。印证"url_rewrite 只适用于无 302 的静态路径"
+
+### S6. 换源导致缓存键分裂与命中率清零（验证：CI 特有缺点 4）
+
+- **验证论点**：话题二"换源 = 旧缓存条目全作废；URL 混用则同一包缓存两份"
+- **步骤**：
+  1. 在 gy-006 先用官方源 wget 一个包两次（第 2 次 HIT，记录命中）
+  2. 客户端 sed 换成镜像源后再拉同一包两次（内容等价的 URL）
+- **判定**：换成镜像域名后第 1 次是 MISS（旧官方 URL 缓存作废），第 2 次才 HIT——证明缓存键 = 完整 URL；分析 access.log 确认同一内容在缓存中存了两份（两个 URL 键）
+- **引申**：统计新旧两种 URL 的请求比例，评估"注入收敛"的必要性
+
+### S7. 新镜像域名未进 ssl_bump 白名单 → 丢失缓存（验证：联动成本缺点 6）
+
+- **验证论点**：话题二"不更新白名单则新域名被 splice 直通，换源反而丢缓存"
+- **步骤**：在**生产配置形态**（域名白名单 splice，参考 PR#3 chart 写法）下，用白名单之外的镜像域名下载归档两次
+- **判定**：access.log 中该域名状态为 `TCP_TUNNEL`（splice 直通，不进 HTTP 缓存层），`registry_proxy_http_hits_total` 无增长——Squid 对它完全无感。随后把域名加入白名单，重复实验变 HIT
+- **注意**：需临时使用 `bump all` 的测试套件，或在 staging 集群验证，避免影响生产
+
+### S8. 镜像站故障的爆炸半径（验证：集中故障点缺点 5）
+
+- **验证论点**：话题二"镜像挂掉 → 所有 job 同时失败；客户端层可单 job 救急"
+- **步骤**：用 iptables/网络策略模拟镜像域名不可达（或挑镜像站维护窗口），同时跑两类 job：a) 换源 job，b) 未换源走官方源 job
+- **判定**：a 失败、b 成功——证明换源引入了新的可用性依赖；演示客户端层可临时删掉 sed/insteadOf 切回官方源救急，而 url_rewrite 方案需要登 Squid 改配置 + reload，救急路径更长
+
+### S9. docker 双轨回归（验证：落地建议第 3 条）
+
+- **验证论点**：话题二"docker 维持 m.daocloud.io 前缀 + registry-proxy 缓存"
+- **步骤**：复用 `traffic-test/tool/17-docker-pull.yaml` 三段式（冷拉 MISS → rmi → pull#2 HIT → pull#3 HIT）
+- **判定**：PULL2/PULL3 时长显著小于 PULL1；`registry_proxy_http_hits_total` 增长且回源下载次数不增加；全程无 401（SWR 凭据挂载正常）
+
+### S10. 汇总回归：统一注入配方 vs 散落注入（验证：收敛建议）
+
+- **验证论点**：话题二"把散落换源收敛为统一注入模板"
+- **步骤**：将 03/06/08/01 等工具用例中的换源注入抽成统一配方（基镜像或 postStart 公共脚本），全量重跑 `scripts/test-all.sh`（Compose 套件）或 16-tool 集群套件
+- **判定**：`jq -e '.all_passed' result.json` 为 true；流量报表域名归因表中新增镜像域名全部出现在 bump 白名单内（无 TCP_TUNNEL 漏网）
+
+### Review 优先级建议
+
+| 优先级 | 场景 | 理由 |
+|---|---|---|
+| P0 | S1、S9 | 已有现成用例，低成本复验核心结论 |
+| P1 | S2、S6、S7 | url_rewrite 兜底落地 + 缓存键/白名单两个最隐蔽的坑 |
+| P2 | S4、S5、S8 | 换源缺点的实证，可手动抽测 |
+| P3 | S3、S10 | 依赖外部时机/全量回归，按需安排 |
