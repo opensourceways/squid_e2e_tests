@@ -1,0 +1,32 @@
+MIRROR-CACHE-TOPIC.md
+  s_01bdef1efbc8c1::t_80e6226b96c0c6 1-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "234710a873912f1b02dcfde630938777036cdb9d",
+  "prompts": {},
+  "sessions": {
+    "s_01bdef1efbc8c1": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a98152b87857a3d213781d7",
+        "model": "glm-5.3-flash__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "dedupe_key": "6a98152b87857a3d213781d7:6a9821b987857a3d213784e5:afterEdit:37b5d405",
+        "edit_kind": "file_edit",
+        "client_type": "ide",
+        "external_session_id": "6a98152b87857a3d213781d7",
+        "tool_id": "Write",
+        "tool_use_id": "6a9821b987857a3d213784e5",
+        "runtime_client": "trae-tob-git-ai",
+        "source_scene": "unknown",
+        "session_id": "6a98152b87857a3d213781d7",
+        "tool_type": "agent",
+        "operation_id": "6a9821b987857a3d213784e5"
+      }
+    }
+  }
+}
