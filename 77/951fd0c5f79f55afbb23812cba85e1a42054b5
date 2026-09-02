@@ -1,0 +1,48 @@
+domaintest/REPORT.md
+  s_eb9afb2911f2fe::t_23fd8a5c0b31ae 1-140
+domaintest/ascend_ci_domains.json
+  s_eb9afb2911f2fe::t_23fd8a5c0b31ae 1-98
+domaintest/test-domains.sh
+  s_eb9afb2911f2fe::t_23fd8a5c0b31ae 1-91
+domaintest/.gitignore
+  s_eb9afb2911f2fe::t_23fd8a5c0b31ae 1-6
+domaintest/REPORT-x20.md
+  s_eb9afb2911f2fe::t_23fd8a5c0b31ae 1-158
+domaintest/x20-remote.sh
+  s_eb9afb2911f2fe::t_23fd8a5c0b31ae 1-22
+domaintest/test-domains-x20.sh
+  s_eb9afb2911f2fe::t_23fd8a5c0b31ae 1-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "77951fd0c5f79f55afbb23812cba85e1a42054b5",
+  "prompts": {},
+  "humans": {
+    "h_dc619ff2c05908": {
+      "author": "chenqi49 <479148871@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_eb9afb2911f2fe": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a96999a2397bca1f9dfeb6d",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "operation_id": "6a97eae887857a3d21377dd5",
+        "tool_name": "RunCommand",
+        "runtime_client": "trae-tob-git-ai",
+        "client_type": "ide",
+        "tool_use_id": "6a97eae887857a3d21377dd5",
+        "session_id": "6a96999a2397bca1f9dfeb6d",
+        "display_model_name": "DeepSeek-V4-Flash 正式版",
+        "external_session_id": "6a96999a2397bca1f9dfeb6d",
+        "source_scene": "agent",
+        "edit_kind": "bash"
+      }
+    }
+  }
+}
