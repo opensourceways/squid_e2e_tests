@@ -1,0 +1,95 @@
+.gitignore
+  s_eb9afb2911f2fe::t_f3133914d59b61 5
+  s_eb9afb2911f2fe::t_ef2795ee6684fe 6
+traffic-test/monitor/gy002-traffic-report.txt
+  s_eb9afb2911f2fe::t_d44787c309f56b 3,7,12,21-22,25,27-28
+  s_eb9afb2911f2fe::t_e8ffabf6db5a73 1-2,4-6,8-11,13-18,23-24,31-32
+domaintest/ascend_ci_domains.json
+  s_eb9afb2911f2fe::t_6d4661ba3c5cee 74-76
+  s_eb9afb2911f2fe::t_dfa5454f84c813 1-73,77-95,97-98
+  s_eb9afb2911f2fe::t_23b9a20d85eded 96
+traffic-test/monitor/gy001-traffic-report.txt
+  s_eb9afb2911f2fe::t_d44787c309f56b 1-40,43-47,49-50,53-54
+domaintest/REPORT.md
+  s_eb9afb2911f2fe::t_c5d5c4bfc47a11 3,10,12,16-17,19,21-28,31,33,39-43,45,53,95,100,119,121,132,140
+  s_eb9afb2911f2fe::t_d19b037f4e0c19 35-38,44
+  s_eb9afb2911f2fe::t_3bc42084b01de2 1-2,4-9,11,13-15,18,20,29-30,32,34,46-52,54-94,96-99,101-118,120,122-131,133-139
+domaintest/REPORT-x20.md
+  s_eb9afb2911f2fe::t_bdb4af53047b8d 3,9-10,15-18,38,41-43,45-53,59,63,135-158
+  s_eb9afb2911f2fe::t_c9c1f8b696db5a 1-2,4-8,11-14,19-37,39-40,44,54-58,60-62,64-134
+domaintest/.gitignore
+  h_dc619ff2c05908 1-6
+domaintest/test-domains.sh
+  s_eb9afb2911f2fe::t_266992bbad6e69 1-91
+traffic-test/monitor/analyze-domain-traffic.py
+  s_eb9afb2911f2fe::t_c84c8e02dddaac 169,177-178,180,193-196,199-200
+  s_eb9afb2911f2fe::t_f7af7537b9f77b 19-22
+  s_eb9afb2911f2fe::t_60f4960f93744a 100,105-106,114-115,144-145,147-151,165-166
+  s_eb9afb2911f2fe::t_7926d7f2305cb2 319,322-325
+  s_eb9afb2911f2fe::t_705f0d3d1bf532 205,210,216-217,227-228,236-237,239-241,247-248,264,272
+  s_5585415acf50c9::t_74dd166aa56b56 65-69,72-73,86-96
+  s_eb9afb2911f2fe::t_b8920319c2c5ec 62-64,70-71,74-85,97
+traffic-test/monitor/wlcb001-traffic-report.txt
+  s_eb9afb2911f2fe::t_e8ffabf6db5a73 3,5,7-9,16-17,21-22
+  s_5585415acf50c9::t_a30e67c9bfec48 1-2,6,11-12,18,25-26
+  s_eb9afb2911f2fe::t_d44787c309f56b 4,10,15,19
+domaintest/test-domains-x20.sh
+  s_eb9afb2911f2fe::t_fb8fe5b97ba02d 1-10,12-14,16-52
+  s_eb9afb2911f2fe::t_9fd945ab4c018a 11,15
+domaintest/x20-remote.sh
+  s_eb9afb2911f2fe::t_72b6ed00a912af 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "ca8ddad29a8b3222653cc1303a47e63ac392fcb9",
+  "prompts": {},
+  "humans": {
+    "h_dc619ff2c05908": {
+      "author": "chenqi49 <479148871@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_5585415acf50c9": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a97a020400d4d142bbebe00",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "client_type": "ide",
+        "session_id": "6a97a020400d4d142bbebe00",
+        "tool_use_id": "6a97a1d9400d4d142bbebeaa",
+        "operation_id": "6a97a1d9400d4d142bbebeaa",
+        "display_model_name": "DeepSeek-V4-Flash 正式版",
+        "external_session_id": "6a97a020400d4d142bbebe00",
+        "runtime_client": "trae-tob-git-ai",
+        "source_scene": "agent",
+        "edit_kind": "bash",
+        "tool_name": "RunCommand"
+      }
+    },
+    "s_eb9afb2911f2fe": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a96999a2397bca1f9dfeb6d",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "source_scene": "unknown",
+        "tool_use_id": "6a97d91987857a3d21377c22",
+        "runtime_client": "trae-tob-git-ai",
+        "operation_id": "6a97d91987857a3d21377c22",
+        "session_id": "6a96999a2397bca1f9dfeb6d",
+        "edit_kind": "file_edit",
+        "tool_type": "agent",
+        "dedupe_key": "6a96999a2397bca1f9dfeb6d:6a97d91987857a3d21377c22:afterEdit:a095b2f4",
+        "external_session_id": "6a96999a2397bca1f9dfeb6d",
+        "tool_id": "Edit",
+        "client_type": "ide"
+      }
+    }
+  }
+}
