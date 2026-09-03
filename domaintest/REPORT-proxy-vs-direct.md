@@ -1,8 +1,10 @@
 # 域名连通性 Proxy vs 直连 对比报告 (wlcb vs gy-001)
 
-> 生成时间: 2026-09-03 15:48:00  |  每个域名 **20 轮 × 2 模式**(经 squid proxy / 直连), 两集群并行, 数据源: [ascend_ci_domains.json](ascend_ci_domains.json) (共 92 条实域名)
+> ⚠️ **作废声明 (2026-09-03)**: 本报告的 `--proxy http://127.0.0.1:3128` 在 squid pod 内命中的是 **registry-proxy (rpardini nginx)**, 不是 squid —— squid 实际监听 `3129` (`http_port 3129 ssl-bump`)。因此本报告全部"proxy 劣化"分析测的是 **nginx 出口**, 结论**不适用于生产 squid 路径**。真实 squid 路径基线见 [REPORT-x20.md](REPORT-x20.md) 修正版: 三集群 92 域 0 个全挂, 仅 CDN 多 IP 偶发抖动。本报告保留仅供方法学复盘, **请勿引用其中结论**。
 
-## 测试方法
+> 生成时间: 2026-09-03 15:48:00  |  每个域名 **20 轮 × 2 模式**(经 proxy / 直连), 两集群并行, 数据源: [ascend_ci_domains.json](ascend_ci_domains.json) (共 92 条实域名)
+
+## 测试方法 (已失效, 见上方作废声明)
 
 - 4 组合: **wlcb**(squid `192.168.1.49`) / **gy-001**(squid `172.16.0.37`) × **经 proxy** `curl -sk --proxy http://127.0.0.1:3128` / **直连** `curl -sk`。
 - 均在各自 squid pod 内执行(`kubectl exec`), 每域每模式连续 20 轮, `--max-time 6`。
