@@ -291,3 +291,49 @@ never_direct allow foreign_src
 | P1 | S2、S6、S7、S12 | url_rewrite 兜底落地 + 缓存键/白名单两个最隐蔽的坑 + M3 原型 |
 | P2 | S4、S5、S8、S11 | 换源缺点的实证 + M2 不可控性，可手动抽测 |
 | P3 | S3、S10 | 依赖外部时机/全量回归，按需安排 |
+
+---
+
+## 话题三：vllm-ascend workflow runner + BuildKit 落地建议（2026-09-02 留档）
+
+针对 vllm-benchmarks（vllm-ascend CI，自托管 ARC runner on k8s）的实测场景，
+结论一句话：**这套 CI 的换源已经正确做在客户端层，Squid 只做「缓存 + 稳定出口」两件事，绝不在 Squid 里做 url_rewrite 全局换源。**
+
+### 背景：workflow 流量分四类（与本文档 U 系列对照）
+
+| 流量 | 出处 | 场景 | 缓存价值 |
+|---|---|---|---|
+| PR 生命周期自动化（api.github.com / gh CLI） | bot_pr_create、pr_close_job、pr_*_command 系列 | U 有状态 API | 0%（splice） |
+| PR CI（pre-commit→select-tests→ensure-csrc-cache→run-selected-tests→ci-gate） | pr_test.yaml | U1/U2 静态下载 + U3-U5 git + U6 docker | OBS/包高、git 0% |
+| main2main E2E（常驻 NPU job，signal/results 分支 + PAT push，三条回退路由） | main2main-e2e.yaml | U3-U5 git 密集 + 有状态 push | git 0%（稳定出口才有价值） |
+| schedule/nightly/weekly/镜像构建 | schedule_* 系列 | U1/U2 包管理器 + U6 docker | 高 |
+
+**关键现状**：apt/yum `sed` 到内部 `cache-service:8081`、pypi 走 `UV_INDEX_URL` 内部镜像、git 走 `insteadOf`（真实 job：`git-cache-*.svc.cluster.local:8080`；workflow：gh-proxy.test.osinfra.cn）、GOPROXY 内部代理。**换源已全部在客户端层，Squid 尚未介入这批 runner。**
+
+### 对 workflow runner：Squid 的职责边界
+
+- **禁止 bump/重写的域（控制面）**：`github.com`（runner 注册/轮询）、`api.github.com`、`vstoken.actions.githubusercontent.com`、`pipelines.actions.githubusercontent.com`。WebSocket + Bearer token，有状态不缓存；bump 后不注入 CA 会直接搞坏 runner TLS 校验；url_rewrite 换源 = 认证全断。
+- **git push（main2main signal/results）**：PAT 内嵌在 push URL，重写断认证；POST /git-upload-pack 命中率恒 0%。
+- **可缓存但要小心**：action 下载 tarball（codeload / github.com/.../archive）静态可缓存，但**必须 bump**（splice = TCP_TUNNEL 不进缓存层）；OBS cn-north-4（test_case_map/coverage/wheel）纯静态 U1，缓存价值最大，但带签名 URL 不可重写。
+- **github.com 间歇断流的正解是 M3 cache_peer**：main2main 已实证 a3 sh-001 直连 github.com 断 25+ 分钟，靠 gh-proxy/git-cdn 回退。Squid 用 `cache_peer`（真正向代理 parent）+ `never_direct` 路由 github 流量，URL/缓存键不变、git 协议透传——这是唯一"换路不换键、splice 域名也能生效"的 Squid 内方案。
+
+### 对 BuildKit：信任链已通，别叠重写
+
+`buildkitd.toml` 已是 `proxyNetwork=true` + `[proxy] upstreamURL=Squid VIP / upstreamCACert=Squid CA` 的
+三段 CA 链（RUN curl → BuildKit 内置 MITM → Squid MITM → 源），RUN 内 HTTPS 已被 Squid 缓存（测试 08 二次构建 HIT）。
+
+- RUN 内 `wget/curl tarball`、`pip/apt/conda`：静态 U1/U2，换源 + 缓存安全（新域须进 bump 白名单，否则 S7 丢缓存）。
+- RUN 内 `git clone`：U3 不可缓存、换源断 Smart HTTP。
+- RUN 内 HF/ModelScope 模型下载：U7 签名 URL，换源直接断（注意 workflow 里 `VLLM_USE_MODELSCOPE=True`）。
+- **双重重写是额外脆弱点**：BuildKit 内置 MITM + Squid MITM 已两层解密，再叠 helper 换源，排障多一跳。
+- **集中故障点**：url_rewrite 全局生效，镜像挂 → 所有 build 一起挂；客户端层（Dockerfile sed/insteadOf）可单镜像救急。
+
+### 落地结论（对 vllm 这套 CI）
+
+| 事项 | 做法 |
+|---|---|
+| Squid 角色 | 只缓存（静态下载）+ 稳定出口（M3 cache_peer 处理 github 断流），**不做 url_rewrite** |
+| bump 白名单 | 加 action tarball 域、OBS 域、内部镜像域（pypi/apt/goproxy/git-cache）；**registry（swr.*）保持 splice**（U6 token realm 按 host 签发，交 registry-proxy 按 digest 缓存） |
+| git | 维持客户端 insteadOf / gh-proxy，不指望 Squid 缓存 git |
+| BuildKit | 维持现有 [proxy] 三段链，如需换源在 Dockerfile/基镜像层做，Squid 层不介入 |
+| 兜底 | 仅对"改不了客户端"的第三方脚本按静态路径白名单局部启用 url_rewrite（见话题二） |
