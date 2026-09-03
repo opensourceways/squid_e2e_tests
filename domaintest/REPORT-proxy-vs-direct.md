@@ -56,22 +56,24 @@
 **取证事实**(两集群 squid pod 内实测):
 - `resolv.conf` 相同(集群 DNS `169.254.20.10` + `10.247.3.10`), proxy 与直连**用的是同一 DNS 源** → 排除"DNS 服务器不同"。
 - 问题域名均为**多 IP 大池**: `goproxy.cn` 解析出 **13 个 IP**(36.110.220.x / 112.84.130.x / 211.154.x / 36.249.80.x / 45.250.40.239); `files.pythonhosted.org` 5 个 IP(151.101.x.x + 国内节点 112.121.185.26); `pytorch-package.obs` 混合 私网 100.125.x.x + 公网 121.36.121.x。
-- squid.conf 仅 `read_timeout 30 minutes` + `connect_timeout 2 minutes`, **无 `dns_v4_first` / `pconn_timeout` / `connect_retries`**。
+- squid 版本 **7.7.1**(pod 内 `squid --version` 实测); squid.conf 仅 `read_timeout 30 minutes` + `connect_timeout 2 minutes`, **无 `dns_v4_first` / `pconn_timeout` 显式配置**。
 
-据此归纳 4 条根因:
+据此归纳根因(按证据强度排序, 已对照 Squid v7.7 官方文档核实):
 
-1. **squid 单 IP 固定, 无 per-request 多 IP 故障转移**: squid 每次连接按 DNS 缓存结果固定用一个 IP, 一旦该 IP 在出口侧不通/慢, 后续所有请求都撞同一个坏 IP; 直连 curl 每轮重新解析且可换 IP 重试, 命中好 IP 概率高。这解释了 `goproxy.cn`(gy-001 13 IP 池) proxy 8/20 vs 直连 18/20 的 10 次差。
-2. **上游 keep-alive 半开连接复用**: squid 默认长时间保留空闲上游连接(`read_timeout 30m`), 经 NAT/状态防火墙的空闲连接被回收后, 复用即半开, 首个请求卡到超时; 直连每次全新 TCP 无此问题。这解释了多 IP CDN(pythonhosted/pypi/github cdn 子域)proxy 系统性低 1~6 次。
-3. **squid 超时口径与 curl 6s 预算错配**: squid `connect_timeout 2m`, 意为它会为一次失败连接耗到 2 分钟(含按坏 IP→好 IP 的顺序尝试); 而 curl `--max-time 6` 6 秒就放弃。只要 squid 在 6 秒内没把首个字节送回来, 就计失败——即使 squid 之后能成功。跨区域慢链路(wlcb→cn-north-4 OBS)尤其吃亏。
-4. **`github.com`(gy-001) 两路径 0/20 = 出口层黑洞, 与 squid 无关**: 固定解析到单一 IP `20.205.243.166`(Azure 亚太)。同一 IP 在 wlcb(.49) 本轮 20/20 全通、gy-001(.37) 两路径 0/20 → **节点 .37 到该 IP 的路由当前断流**, 属间歇性(3 轮测试时曾 3/3, x20 报告也曾 0/20)。squid 绕不开, 只能靠 M3 cache_peer 稳定出口或 gh-proxy 回退。
+1. **主因: `connect_timeout 2m` 导致坏 IP 判死过慢, 顺序 failover 赶不上客户端 6s 预算**。squid 的解析器按首选顺序使用多 IP, 且**只在当前 IP 失败后才轮到下一个**(官方 `balance_on_multiple_ip` 文档语义: "use these IP in order and only rotates to the next listed when the most preferred fails"; 该指令 v5 起已移除, 此行为成为默认)。但"判死"要等 `connect_timeout`(本环境 2 分钟)——SYN 黑洞型坏 IP 下, squid 在客户端 `--max-time 6` 内根本走不完"判死→换 IP→建连→TLS→首字节"。而 curl 直连走 Happy Eyeballs, ~200ms 级即切换下一地址。合并解释了全部 proxy 劣化现象: `goproxy.cn`(gy-001, 13 IP 池) 8/20 vs 18/20、`pytorch-package.obs`(wlcb, 混私网/公网 IP) 10/20 vs 20/20、以及 pythonhosted/pypi/github cdn 子域的系统性低 1~6 次。跨区域慢链路(wlcb→cn-north-4 OBS)下延迟叠加, 更是必然超预算。
+2. **次因: DNS 首选排序在 TTL 内保持, 坏 IP 被重复首选**。squid 缓存解析结果(有效 TTL = 记录 TTL 与 `positive_dns_ttl` 上限[默认 6h]取小), TTL 内对同一域名始终先试同一个坏首选 IP, 换 IP 的机会被推迟; curl 每轮重新解析, 命中好 IP 概率自然更高。
+3. **存疑(未证实): pconn 空闲半开连接复用**。空闲 server 侧 keep-alive 由 `pconn_timeout` 管(默认 1 minute; `read_timeout` 管的是活动连接 read 间隔, 30m 与空闲复用无关)。复用半开连接的窗口 ≤60s, 只有 NAT/状态防火墙对 established TCP 的 idle 回收 <60s 才成立——多数设备 ≥5min。要坐实需 A/B: 关闭 server pconn(`server_pconn_for_domain`/`pconn_timeout 0`) 对比成功率。
+4. **无关 squid: `github.com`(gy-001) 两路径 0/20 = 出口层黑洞**。固定解析到单一 IP `20.205.243.166`(Azure 亚太)。同一 IP 在 wlcb(.49) 本轮 20/20 全通、gy-001(.37) 两路径 0/20 → **节点 .37 到该 IP 的路由当前断流**, 属间歇性(3 轮测试时曾 3/3, x20 报告也曾 0/20)。squid 绕不开, 只能靠 M3 cache_peer 稳定出口或 gh-proxy 回退。
+
+> 注: 初版报告曾把根因 1 表述为"单 IP 固定、无故障转移", 经查证有误——squid 有顺序 failover, 差距在**判死速度**(受 connect_timeout 拖累)而非"不会换 IP"。
 
 ## 结论与修复方向
 
-- **squid 侧(可调, 收益最大)**:
-  - `dns_v4_first on` — 避免 IPv6 挂起(部分 CDN 解析到 IPv6 先试)。
-  - 缩短 `pconn_timeout`(如 30s)/ 调小 `read_timeout`, 减少半开连接复用。
-  - 对多 IP CDN 配 `connect_retries`(acl) 或 `balance_on_multiple_ip`, 让 squid 单请求可换 IP。
-  - 调小 `connect_timeout`(如 15s) 匹配客户端预算, 避免坏 IP 顺序试连拖垮首个字节时间。
+- **squid 侧(按收益排序)**:
+  - **调小 `connect_timeout`(建议 3~5s)** — 让顺序 failover 能在客户端 6s 预算内完成 1~2 次 IP 切换。正常建连 <1s, 该值只影响坏 IP 判死速度, 3~5s 是安全下限。(收益最大, 直击主因)
+  - `dns_v4_first on` — 避免 IPv6 优先挂起(pypi/pythonhosted 解析出 IPv6 且集群无 v6 出口时, 默认行为会先耗一个地址预算)。
+  - `forward_max_tries`(默认 10, 一般无需动) — 控制"换 IP 重试"的高层上限; ⚠️ `connect_retries` 不是本场景的解: 它管"同一 TCP 连接重开次数"(默认不重试)且不支持按 acl, `balance_on_multiple_ip` 在 Squid 5+ 已移除(7.7.1 不可用), 初版建议有误。
+  - `pconn_timeout`(默认 1min): 是否调小存疑(见根因 3), 建议先 A/B 验证半开复用是否真实发生, 再决定。
 - **跨区域 OBS(wlcb→pytorch-package.obs)**: 直连 20/20 而 proxy 10/20, 建议对该域配 cache_peer/固定私网 IP 路由, 让 squid 走与直连相同的稳定路径。
 - **github.com 黑洞(.37)**: 属出口路由问题, squid 无法根治; 维持 main2main 的 gh-proxy/git-cdn 回退 + M3 cache_peer 稳定出口。
 
