@@ -1,0 +1,33 @@
+domaintest/REPORT-proxy-vs-direct.md
+  s_a9ae88db22638b::t_9872d4f444b4e3 59,61,63-68
+  s_a9ae88db22638b::t_228b92bd257030 72-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "7c3f8afccccb88615b8b89243de8f4430628f1ba",
+  "prompts": {},
+  "sessions": {
+    "s_a9ae88db22638b": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a97a037400d4d142bbebe09",
+        "model": "glm-5.3-flash__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "client_type": "ide",
+        "session_id": "6a97a037400d4d142bbebe09",
+        "operation_id": "6a9928e487857a3d21379270",
+        "edit_kind": "file_edit",
+        "external_session_id": "6a97a037400d4d142bbebe09",
+        "tool_id": "Edit",
+        "tool_use_id": "6a9928e487857a3d21379270",
+        "dedupe_key": "6a97a037400d4d142bbebe09:6a9928e487857a3d21379270:afterEdit:6d0628ce",
+        "runtime_client": "trae-tob-git-ai",
+        "tool_type": "agent",
+        "source_scene": "unknown"
+      }
+    }
+  }
+}
