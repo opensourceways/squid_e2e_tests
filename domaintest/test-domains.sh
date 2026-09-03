@@ -23,7 +23,7 @@ PY
   cat <<EOF
 label="\$1"
 for d in $doms; do
-  r=\$(curl -sk -o /dev/null --proxy http://127.0.0.1:3128 --max-time 6 -w "%{http_code}|%{time_total}" "https://\$d/" 2>/dev/null)
+  r=\$(curl -sk -o /dev/null --proxy http://127.0.0.1:3129 --max-time 6 -w "%{http_code}|%{time_total}" "https://\$d/" 2>/dev/null)
   ec=\$?
   echo "\$label|\$d|\$ec|\$r"
 done

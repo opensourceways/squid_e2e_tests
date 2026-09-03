@@ -29,7 +29,7 @@ for d in $ARGS; do
   while [ "$i" -le "$R" ]; do
     ip=$(getent hosts "$d" | awk '{print $1}' | head -1)
     [ -n "$ip" ] && ips="$ips,$ip"
-    code=$(curl -sk -o /dev/null --proxy http://127.0.0.1:3128 --max-time 6 -w "%{http_code}" "https://$d/" 2>/dev/null)
+    code=$(curl -sk -o /dev/null --proxy http://127.0.0.1:3129 --max-time 6 -w "%{http_code}" "https://$d/" 2>/dev/null)
     ec=$?
     if [ "$ec" -eq 0 ]; then ok=$((ok+1)); else
       case "$ec" in
