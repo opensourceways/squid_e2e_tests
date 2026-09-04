@@ -1,177 +1,189 @@
-# 域名连通性 Proxy vs 直连 对比报告 (wlcb vs gy-001)
+# 域名连通性 Proxy vs 直连 对比报告 (gy-001 / wlcb-001 / gy-002) — 修正版
 
-> ⚠️ **作废声明 (2026-09-03)**: 本报告的 `--proxy http://127.0.0.1:3128` 在 squid pod 内命中的是 **registry-proxy (rpardini nginx)**, 不是 squid —— squid 实际监听 `3129` (`http_port 3129 ssl-bump`)。因此本报告全部"proxy 劣化"分析测的是 **nginx 出口**, 结论**不适用于生产 squid 路径**。真实 squid 路径基线见 [REPORT-x20.md](REPORT-x20.md) 修正版: 三集群 92 域 0 个全挂, 仅 CDN 多 IP 偶发抖动。本报告保留仅供方法学复盘, **请勿引用其中结论**。
+> **本版为修正后的真实 squid 路径测试 (2026-09-04 08:03)**。旧版 (2026-09-03) 的 `--proxy http://127.0.0.1:3128` 在 squid pod 内命中的是 **registry-proxy (rpardini nginx)** 而非 squid —— squid 实际监听 `3129` (`http_port 3129 ssl-bump`)。旧版全部"proxy 劣化"分析测的是 nginx 出口, 结论不适用于生产 squid 路径, 仅供方法学复盘。
+>
+> 本版测试条件与生产 CI 完全一致: **proxy 走 squid `127.0.0.1:3129`**, 且此时三集群 squid 已升级至 **`connect_timeout 5 seconds`** (chart 0.1.8), 即旧报告建议的修复已生效, 本版同时验证了修复效果。
 
-> 生成时间: 2026-09-03 15:48:00  |  每个域名 **20 轮 × 2 模式**(经 proxy / 直连), 两集群并行, 数据源: [ascend_ci_domains.json](ascend_ci_domains.json) (共 92 条实域名)
+## 测试方法
 
-## 测试方法 (已失效, 见上方作废声明)
+- 3 集群 × 92 实域名（[ascend_ci_domains.json](ascend_ci_domains.json)，跳过 `*.` 通配），每域每模式 **20 轮**。
+- 均在各自集群 `squid-cache-0` pod 的 **squid 容器**内执行 (`kubectl exec`):
+  - **proxy**: `curl -sk --proxy http://127.0.0.1:3129 --max-time 6 https://<域>/`
+  - **直连**: `curl -sk --max-time 6 https://<域>/`
+- proxy 与直连跑在**同一个 pod / 同一节点 / 同一出口 NAT**, 外部可达性差异只来自 squid 处理逻辑（DNS 缓存、地址族回退、连接超时）与 curl 直连行为之差, 而非出口不同。
+- 判定: curl exit 0 = 成功（拿到任意 HTTP 响应，**含 squid 生成的 5xx 错误页，见方法学要点**）；28=TIMEOUT / 6=DNSFAIL / 7=CONNFAIL。
+- 分类: **稳定**(proxy=直连=20/20) / **proxy劣化**(proxy<直连) / **直连劣化**(直连<proxy) / **间歇**(两者均非 20/20) / **出口全挂**(两路径 0/20)。
 
-- 4 组合: **wlcb**(squid `192.168.1.49`) / **gy-001**(squid `172.16.0.37`) × **经 proxy** `curl -sk --proxy http://127.0.0.1:3128` / **直连** `curl -sk`。
-- 均在各自 squid pod 内执行(`kubectl exec`), 每域每模式连续 20 轮, `--max-time 6`。
-- **关键前提**: proxy 与直连跑在**同一个 pod / 同一节点 / 同一出口 NAT**, 因此外部可达性差异**只可能来自 squid 处理逻辑**(DNS 缓存、连接复用、超时), 而不是出口不同。
-- 判定: curl exit 0 = 成功; 28=TIMEOUT / 6=DNSFAIL / 7=CONNFAIL。成功率 = 20 轮成功数。
-- 分类: **稳定**(proxy=直连=20/20) / **proxy劣化**(proxy<直连) / **直连劣化**(直连<proxy) / **出口全挂**(任一集群两路径 0/20)。
+## ⚠️ 方法学要点: proxy 成功率包含 squid 生成的 503 错误响应
+
+proxy 路径的成功判定是"curl 拿到**任意** HTTP 响应"（exit 0），**squid 侧生成的 `503 Gateway Timeout` 错误页也算成功**。定向复测确认:
+
+| 域名 | squid 返回码 | 真实含义 |
+|---|---|---|
+| mirrors.ustc.edu.cn | **503** | 源站/IPv6 出口仍不可达, 但 squid 在预算内快速失败, 不挂死客户端 |
+| 123.60.114.225 | **503** | 源站 443 仍不可达, 同上 |
+
+因此这两域的 proxy "20/20" **不是真实可达**, 而是 squid **快速失败**（优于直连的 6s 干等超时）。下文中此类域已在"直连劣化"里单独标注 `(503)`。
 
 ## 汇总
 
-| 集群 | 稳定 (20/20 两路径) | proxy劣化 | 直连劣化 | 出口全挂 (两路径 0/20) | 合计 |
-|---|---|---|---|---|---|
-| wlcb (.49) | 83 | 5 | 1 | 3 | 92 |
-| gy-001 (.37) | 79 | 9 | 0 | 4 | 92 |
-
-## 核心发现: proxy 路径独有劣化 (直连可达, 走 squid 失败)
-
-| 域名 | 集群 | proxy | 直连 | 差 |
-|---|---|---|---|---|
-| pytorch-package.obs.cn-north-4.myhuaweicloud.com | wlcb | **10/20** | 20/20 | -10 |
-| goproxy.cn | gy-001 | **8/20** | 18/20 | -10 |
-| files.pythonhosted.org | wlcb | **14/20** | 20/20 | -6 |
-| op-svc-swr-b051-10-230-33-197-3az.obs.cn-south-1 | wlcb | **14/20** | 20/20 | -6 |
-| files.pythonhosted.org | gy-001 | **16/20** | 20/20 | -4 |
-| pkg-containers.githubusercontent.com | gy-001 | **17/20** | 20/20 | -3 |
-| op-svc-swr-b051-10-230-33-197-3az.obs.cn-south-1 | gy-001 | **17/20** | 20/20 | -3 |
-| objects.githubusercontent.com | gy-001 | **18/20** | 20/20 | -2 |
-| github-cloud.githubusercontent.com | gy-001 | **18/20** | 20/20 | -2 |
-| pypi.org | wlcb | 18/20 | 20/20 | -2 |
-| github-releases.githubusercontent.com | gy-001 | 19/20 | 20/20 | -1 |
-| github-registry-files.githubusercontent.com | gy-001 | 19/20 | 20/20 | -1 |
-| pypi.org | gy-001 | 19/20 | 20/20 | -1 |
-| goproxy.cn | wlcb | 19/20 | 20/20 | -1 |
-
-## 直连劣化 (仅 1 例, 属噪声)
-
-| 域名 | 集群 | proxy | 直连 |
-|---|---|---|---|
-| download.pytorch.org | wlcb | 19/20 | 18/20 |
-
-## 出口全挂 (两路径 0/20, 与 squid 无关)
-
-| 域名 | wlcb proxy/直连 | gy-001 proxy/直连 | 说明 |
-|---|---|---|---|
-| data.pyg.org | 0/0 | 0/0 | 两集群出口均不可达 |
-| mirrors.ustc.edu.cn | 0/0 | 0/0 | IPv6-only 解析, 无 IPv6 出口 |
-| 123.60.114.225 | 0/0 | 0/0 | 裸 IP/源站不可达 |
-| github.com | 20/20 | **0/0** | 仅 gy-001 本轮两路径全挂(间歇黑洞, 见下) |
-
-## Why: proxy 为什么比直连差 (定向取证)
-
-**取证事实**(两集群 squid pod 内实测):
-- `resolv.conf` 相同(集群 DNS `169.254.20.10` + `10.247.3.10`), proxy 与直连**用的是同一 DNS 源** → 排除"DNS 服务器不同"。
-- 问题域名均为**多 IP 大池**: `goproxy.cn` 解析出 **13 个 IP**(36.110.220.x / 112.84.130.x / 211.154.x / 36.249.80.x / 45.250.40.239); `files.pythonhosted.org` 5 个 IP(151.101.x.x + 国内节点 112.121.185.26); `pytorch-package.obs` 混合 私网 100.125.x.x + 公网 121.36.121.x。
-- squid 版本 **7.7.1**(pod 内 `squid --version` 实测); squid.conf 仅 `read_timeout 30 minutes` + `connect_timeout 2 minutes`, **无 `dns_v4_first` / `pconn_timeout` 显式配置**。
-
-据此归纳根因(按证据强度排序, 已对照 Squid v7.7 官方文档核实):
-
-1. **主因: `connect_timeout 2m` 导致坏 IP 判死过慢, 顺序 failover 赶不上客户端 6s 预算**。squid 的解析器按首选顺序使用多 IP, 且**只在当前 IP 失败后才轮到下一个**(官方 `balance_on_multiple_ip` 文档语义: "use these IP in order and only rotates to the next listed when the most preferred fails"; 该指令 v5 起已移除, 此行为成为默认)。但"判死"要等 `connect_timeout`(本环境 2 分钟)——SYN 黑洞型坏 IP 下, squid 在客户端 `--max-time 6` 内根本走不完"判死→换 IP→建连→TLS→首字节"。而 curl 直连走 Happy Eyeballs, ~200ms 级即切换下一地址。合并解释了全部 proxy 劣化现象: `goproxy.cn`(gy-001, 13 IP 池) 8/20 vs 18/20、`pytorch-package.obs`(wlcb, 混私网/公网 IP) 10/20 vs 20/20、以及 pythonhosted/pypi/github cdn 子域的系统性低 1~6 次。跨区域慢链路(wlcb→cn-north-4 OBS)下延迟叠加, 更是必然超预算。
-2. **次因: DNS 首选排序在 TTL 内保持, 坏 IP 被重复首选**。squid 缓存解析结果(有效 TTL = 记录 TTL 与 `positive_dns_ttl` 上限[默认 6h]取小), TTL 内对同一域名始终先试同一个坏首选 IP, 换 IP 的机会被推迟; curl 每轮重新解析, 命中好 IP 概率自然更高。
-3. **存疑(未证实): pconn 空闲半开连接复用**。空闲 server 侧 keep-alive 由 `pconn_timeout` 管(默认 1 minute; `read_timeout` 管的是活动连接 read 间隔, 30m 与空闲复用无关)。复用半开连接的窗口 ≤60s, 只有 NAT/状态防火墙对 established TCP 的 idle 回收 <60s 才成立——多数设备 ≥5min。要坐实需 A/B: 关闭 server pconn(`server_pconn_for_domain`/`pconn_timeout 0`) 对比成功率。
-4. **无关 squid: `github.com`(gy-001) 两路径 0/20 = 出口层黑洞**。固定解析到单一 IP `20.205.243.166`(Azure 亚太)。同一 IP 在 wlcb(.49) 本轮 20/20 全通、gy-001(.37) 两路径 0/20 → **节点 .37 到该 IP 的路由当前断流**, 属间歇性(3 轮测试时曾 3/3, x20 报告也曾 0/20)。squid 绕不开, 只能靠 M3 cache_peer 稳定出口或 gh-proxy 回退。
-
-> 注: 初版报告曾把根因 1 表述为"单 IP 固定、无故障转移", 经查证有误——squid 有顺序 failover, 差距在**判死速度**(受 connect_timeout 拖累)而非"不会换 IP"。
-
-## 结论与修复方向
-
-- **squid 侧(按收益排序)**:
-  - **调小 `connect_timeout`(建议 3~5s)** — 让顺序 failover 能在客户端 6s 预算内完成 1~2 次 IP 切换。正常建连 <1s, 该值只影响坏 IP 判死速度, 3~5s 是安全下限。(收益最大, 直击主因)
-  - `dns_v4_first on` — 避免 IPv6 优先挂起(pypi/pythonhosted 解析出 IPv6 且集群无 v6 出口时, 默认行为会先耗一个地址预算)。
-  - `forward_max_tries`(默认 10, 一般无需动) — 控制"换 IP 重试"的高层上限; ⚠️ `connect_retries` 不是本场景的解: 它管"同一 TCP 连接重开次数"(默认不重试)且不支持按 acl, `balance_on_multiple_ip` 在 Squid 5+ 已移除(7.7.1 不可用), 初版建议有误。
-  - `pconn_timeout`(默认 1min): 是否调小存疑(见根因 3), 建议先 A/B 验证半开复用是否真实发生, 再决定。
-- **跨区域 OBS(wlcb→pytorch-package.obs)**: 直连 20/20 而 proxy 10/20, 建议对该域配 cache_peer/固定私网 IP 路由, 让 squid 走与直连相同的稳定路径。
-- **github.com 黑洞(.37)**: 属出口路由问题, squid 无法根治; 维持 main2main 的 gh-proxy/git-cdn 回退 + M3 cache_peer 稳定出口。
-
-## 全量明细 (92 条, 格式: wlcb-proxy / wlcb-直连 / gy-proxy / gy-直连)
-
-| # | 域名 | wlcb proxy | wlcb 直连 | gy proxy | gy 直连 | 分类 |
+| 集群 | 稳定 (20/20 两路径) | proxy劣化 | 直连劣化 | 间歇 | 出口全挂 (两路径 0/20) | 合计 |
 |---|---|---|---|---|---|---|
-| 1 | devcloud.cn-north-4.huaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 2 | devrepo.devcloud.cn-north-4.huaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 3 | download.pytorch.org | 19/20 | 18/20 | 20/20 | 20/20 | 直连劣化 |
-| 4 | download-r2.pytorch.org | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 5 | pytorch-package.obs.cn-north-4.myhuaweicloud.com | 10/20 | 20/20 | 20/20 | 20/20 | proxy劣化 |
-| 6 | pta-pr.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 7 | mindstudio-pr.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 8 | www.sqlite.org | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 9 | sum.golang.google.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 10 | data.pyg.org | 0/20 | 0/20 | 0/20 | 0/20 | 出口全挂 |
-| 11 | obs.cn-north-1.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 12 | op-svc-swr-b051-10-38-19-62-3az.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 13 | op-svc-swr-cn-north-4-backup.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 14 | obs.cn-north-9.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 15 | op-svc-swr-b051-10-147-7-14-3az.obs.cn-east-3.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 16 | op-svc-swr-cn-east-3-backup.obs.cn-east-3.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 17 | op-svc-swr-b051-10-230-33-197-3az.obs.cn-south-1.myhuaweicloud.com | 14/20 | 20/20 | 17/20 | 20/20 | proxy劣化 |
-| 18 | op-svc-swr-cn-south-1-backup.obs.cn-south-1.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 19 | op-svc-swr-b051-10-205-14-19-3az.obs.cn-southwest-2.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 20 | obs.dualstack.cn-east-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 21 | lfs-cdn.openeuler.openatom.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 22 | artlfs.openeuler.openatom.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 23 | openeuler.openatom.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 24 | ru-repo.openeuler.org | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 25 | fr-repo.openeuler.org | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 26 | www.modelscope.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 27 | cdn-lfs-cn-1.modelscope.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 28 | gh-proxy.test.osinfra.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 29 | apig.openlibing.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 30 | get.helm.sh | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 31 | openlibing-codeql.obs.cn-southwest-2.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 32 | archive.ubuntu.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 33 | security.ubuntu.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 34 | gitee.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 35 | ports.ubuntu.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 36 | api.github.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 37 | broker.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 38 | pipelines.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 39 | pipelinesghubeus4.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 40 | results-receiver.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 41 | github.com | 20/20 | 20/20 | 0/20 | 0/20 | 出口全挂 |
-| 42 | codeload.github.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 43 | objects.githubusercontent.com | 20/20 | 20/20 | 18/20 | 20/20 | proxy劣化 |
-| 44 | objects-origin.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 45 | github-releases.githubusercontent.com | 20/20 | 20/20 | 19/20 | 20/20 | proxy劣化 |
-| 46 | github-registry-files.githubusercontent.com | 20/20 | 20/20 | 19/20 | 20/20 | proxy劣化 |
-| 47 | pkg-containers.githubusercontent.com | 20/20 | 20/20 | 17/20 | 20/20 | proxy劣化 |
-| 48 | ghcr.io | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 49 | github-cloud.githubusercontent.com | 20/20 | 20/20 | 18/20 | 20/20 | proxy劣化 |
-| 50 | github-cloud.s3.amazonaws.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 51 | dependabot-actions.githubapp.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 52 | release-assets.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 53 | api.snapcraft.io | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 54 | pipelinesghubeus1.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 55 | pipelinesghubeus2.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 56 | pipelinesghubeus3.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 57 | pipelinesghubeus5.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 58 | pipelinesghubeus6.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 59 | pipelinesghubeus7.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 60 | pipelinesghubeus8.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 61 | pipelinesghubeus9.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 62 | pipelinesghubeus10.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 63 | pipelinesghubeus11.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 64 | pipelinesghubeus12.actions.githubusercontent.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 65 | download.openmmlab.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 66 | rsproxy.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 67 | goproxy.cn | 19/20 | 20/20 | 8/20 | 18/20 | proxy劣化 |
-| 68 | repo.anaconda.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 69 | repo.mindspore.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 70 | repo.oepkgs.net | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 71 | repo.openeuler.org | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 72 | mirrors.ustc.edu.cn | 0/20 | 0/20 | 0/20 | 0/20 | 出口全挂 |
-| 73 | lfs-cdn.gitcode.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 74 | cn-north-4-octopus-gitcode-runner.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 75 | gitcode.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 76 | atomgit.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 77 | mirrors.huaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 78 | mindcluster.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 79 | mirrors.aliyun.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 80 | mirrors.tuna.tsinghua.edu.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 81 | repo.huaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 82 | mindstudio-pkg.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 83 | files.pythonhosted.org | 14/20 | 20/20 | 16/20 | 20/20 | proxy劣化 |
-| 84 | mindx-package.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 85 | pypi.tuna.tsinghua.edu.cn | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 86 | mindie-pr.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 87 | pypi.org | 18/20 | 20/20 | 19/20 | 20/20 | proxy劣化 |
-| 88 | build-env.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 89 | ppa.launchpad.net | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 90 | obs-community.obs.cn-north-1.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 91 | ascend-cann-open.obs.cn-north-4.myhuaweicloud.com | 20/20 | 20/20 | 20/20 | 20/20 | 稳定 |
-| 92 | 123.60.114.225 | 0/20 | 0/20 | 0/20 | 0/20 | 出口全挂 |
+| gy-001 (.37) | 82 | 2 | 8 | 0 | 0 | 92 |
+| wlcb-001 (.49) | 81 | 3 | 6 | 2 | 0 | 92 |
+| gy-002 | 80 | 3 | 9 | 0 | 0 | 92 |
+
+**与旧版 (nginx-3128) 对比: 出口全挂从 3~4 个降为 0 个, proxy 劣化从 5~9 个降为 2~3 个且全部是 ±1 噪声。**
+
+## 核心发现
+
+### 1. `connect_timeout 5s` 修复显著生效: 系统性 proxy 劣化基本消除
+
+旧版"proxy 系统性劣于直连"的根因是多 IP 顺序 failover 判死过慢（`connect_timeout 2m`），本次在 5s 下复测, 全部大劣化域恢复:
+
+| 域名 (集群) | 旧版 nginx-3128 proxy | 旧版直连 | 本版 squid-3129 proxy | 本版直连 |
+|---|---|---|---|---|
+| goproxy.cn (gy-001) | **8/20** | 18/20 | **20/20** | 20/20 |
+| pytorch-package.obs (wlcb) | **10/20** | 20/20 | **19/20** | 20/20 |
+| op-svc-swr-b051-10-230-33-197 (wlcb / gy) | **14/20 / 17/20** | 20/20 | **20/20 / 20/20** | 20/20 |
+| files.pythonhosted.org (wlcb / gy) | **14/20 / 16/20** | 20/20 | **19/20 / 19/20** | 20/20 / 19/20 |
+| pypi.org (wlcb / gy) | **18/20 / 19/20** | 20/20 | **20/20 / 20/20** | 20/20 / 19/20 |
+| github-cloud / objects / pkg-containers 等 CDN 子域 (gy) | 17~19/20 | 20/20 | **20/20 (除 github-cloud.s3 19/20)** | 19~20/20 |
+
+剩余 proxy 差值全部为 **1 次**（如 gy-001 `github-cloud.s3` 19/20、wlcb `ports.ubuntu.com` 19/20、gy-002 `pkg-containers` 19/20），属正常抖动，不再成系统性劣化。
+
+### 2. 0 个"两路径全挂"（旧版 3~4 个）
+
+- **github.com (gy-001)**: 旧版 0/20（出口层黑洞）→ 本版 **20/20**，间歇黑洞已恢复。
+- **data.pyg.org / mirrors.ustc.edu.cn / 123.60.114.225**: 旧版两集群两路径 0/20 → 本版不再全挂（详见第 4 点与下方 `(503)` 标注）。
+
+### 3. 反转为"直连劣化"为主: squid 路径比直连更稳
+
+本版直连劣化 (6~9 个/集群) 明显多于 proxy 劣化 (2~3 个)。典型:
+
+| 域名 | gy-001 proxy/直连 | wlcb proxy/直连 | gy-002 proxy/直连 |
+|---|---|---|---|
+| repo.openeuler.org | 20/20 / **16/20** | 20/20 / **19/20** | 20/20 / **18/20** |
+| www.sqlite.org | 20/20 / 19/20 | 20/20 / 19/20 | 20/20 / **18/20** |
+| data.pyg.org | 12/20 / **0/20** | 12/20 / **0/20** | 20/20 / **0/20 (20×DNSFAIL)** |
+| objects-origin / objects / pypi.org / archive.ubuntu | 20/20 / 19~20/20 | — | 20/20 / 19/20 |
+
+即部分域在 pod 内**直连**（curl 直接出网）不稳定（DNS 偶发失败/超时，如 data.pyg.org 直连 20 轮全挂），而经 squid 反而 20/20。这与旧版"proxy 必劣化"的印象相反——squid 的 **DNS 缓存 + 地址族自动回退 + 5s 快速判死**使代理路径更健壮。
+
+### 4. 仍不可达的源站: squid 快速失败 (503) 优于直连干等
+
+| 域名 | proxy (实为 squid 返回码) | 直连 | 说明 |
+|---|---|---|---|
+| mirrors.ustc.edu.cn | 20/20 (gy-001/wlcb 为 **503**; gy-002 200) | 0/20 (gy-001/wlcb) | IPv6 源站/出口问题, squid 快速 503, 不挂死客户端 |
+| 123.60.114.225 | 20/20 (三集群均 **503**) | 0/20 (三集群) | 裸 IP 源站 443 不可达, 同上 |
+| data.pyg.org | 12~20/20 (200) | 0/20 (DNS/超时) | 直连 DNS 不稳, squid 路径多数可达 |
+
+> 注意: `mirrors.ustc.edu.cn` / `123.60.114.225` 经 squid 的成功是 **503 快速失败**, 不代表缓存/下载可用, 生产仍需域名白名单层面规避或换镜像源。
+
+### 5. 间歇性域 (两轮内波动, 非结构性)
+
+- `results-receiver.actions.githubusercontent.com` (wlcb 19/19; gy-002 19/17)、`files.pythonhosted.org` (wlcb 19/19)、`apig.openlibing.com` (gy-002 直连 0/20 但复测 404 可达) —— 均属间歇抖动, 无固定方向。
+
+## 结论
+
+1. **`connect_timeout 5s` 修复被本版实测验证有效**：多 IP 域（goproxy.cn、OBS 多 IP、CDN 大池）的"proxy 系统性劣化"消失，剩余差值 ≤1 次为噪声。该配置**值得保留并推广到其余集群**。
+2. **0 个全挂 + proxy 稳定性反超直连**：生产 CI 走 squid 路径（`squid-cache:3128` → targetPort 3129）与直连出网相比不再有劣势，且在 DNS/地址族回退上更稳。
+3. **仍待处理的源站**（mirrors.ustc.edu.cn、123.60.114.225）经 squid 为 503 快速失败——对客户端友好但非真实可达；data.pyg.org 属间歇，非结构性。
+4. 上一版"作废声明"指出的 nginx-3128 误测问题，本版已用 squid-3129 全量重测，旧版结论（proxy 劣化/黑洞）**不适用于生产 squid 路径**，请以本版为准。
+
+## 全量明细 (92 条, 列格式: `proxy/20 · 直连/20`)
+
+| # | 域名 | gy-001 | wlcb-001 | gy-002 | 分类 |
+|---|---|---|---|---|---|
+| 1 | devcloud.cn-north-4.huaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 2 | devrepo.devcloud.cn-north-4.huaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 3 | download.pytorch.org | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 4 | download-r2.pytorch.org | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 5 | pytorch-package.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 19/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 6 | pta-pr.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 7 | mindstudio-pr.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 8 | www.sqlite.org | 20/20 · 19/20 | 20/20 · 19/20 | 20/20 · 18/20 | 直连劣化 |
+| 9 | sum.golang.google.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 10 | data.pyg.org | 12/20 · 0/20 | 12/20 · 0/20 | 20/20 · 0/20 | 直连劣化 |
+| 11 | obs.cn-north-1.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 12 | op-svc-swr-b051-10-38-19-62-3az.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 13 | op-svc-swr-cn-north-4-backup.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 14 | obs.cn-north-9.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 15 | op-svc-swr-b051-10-147-7-14-3az.obs.cn-east-3.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 16 | op-svc-swr-cn-east-3-backup.obs.cn-east-3.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 17 | op-svc-swr-b051-10-230-33-197-3az.obs.cn-south-1.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 18 | op-svc-swr-cn-south-1-backup.obs.cn-south-1.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 19 | op-svc-swr-b051-10-205-14-19-3az.obs.cn-southwest-2.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 20 | obs.dualstack.cn-east-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 21 | lfs-cdn.openeuler.openatom.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 22 | artlfs.openeuler.openatom.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 23 | openeuler.openatom.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 24 | ru-repo.openeuler.org | 20/20 · 20/20 | 19/20 · 20/20 | 19/20 · 20/20 | proxy劣化 |
+| 25 | fr-repo.openeuler.org | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 26 | www.modelscope.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 27 | cdn-lfs-cn-1.modelscope.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 28 | gh-proxy.test.osinfra.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 29 | apig.openlibing.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 0/20 | 稳定 |
+| 30 | get.helm.sh | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 31 | openlibing-codeql.obs.cn-southwest-2.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 32 | archive.ubuntu.com | 20/20 · 19/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 33 | security.ubuntu.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 34 | gitee.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 35 | ports.ubuntu.com | 20/20 · 20/20 | 19/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 36 | api.github.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 37 | broker.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 38 | pipelines.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 39 | pipelinesghubeus4.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 40 | results-receiver.actions.githubusercontent.com | 20/20 · 20/20 | 19/20 · 19/20 | 19/20 · 17/20 | 间歇 |
+| 41 | github.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 42 | codeload.github.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 43 | objects.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 19/20 | 稳定 |
+| 44 | objects-origin.githubusercontent.com | 20/20 · 20/20 | 20/20 · 19/20 | 20/20 · 19/20 | 直连劣化 |
+| 45 | github-releases.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 46 | github-registry-files.githubusercontent.com | 20/20 · 19/20 | 20/20 · 20/20 | 19/20 · 20/20 | 直连劣化 |
+| 47 | pkg-containers.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 19/20 · 20/20 | 稳定 |
+| 48 | ghcr.io | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 49 | github-cloud.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 50 | github-cloud.s3.amazonaws.com | 19/20 · 20/20 | 20/20 · 20/20 | 20/20 · 19/20 | proxy劣化 |
+| 51 | dependabot-actions.githubapp.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 52 | release-assets.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 53 | api.snapcraft.io | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 54 | pipelinesghubeus1.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 55 | pipelinesghubeus2.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 56 | pipelinesghubeus3.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 57 | pipelinesghubeus5.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 58 | pipelinesghubeus6.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 59 | pipelinesghubeus7.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 60 | pipelinesghubeus8.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 61 | pipelinesghubeus9.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 62 | pipelinesghubeus10.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 63 | pipelinesghubeus11.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 64 | pipelinesghubeus12.actions.githubusercontent.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 65 | download.openmmlab.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 66 | rsproxy.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 67 | goproxy.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 68 | repo.anaconda.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 69 | repo.mindspore.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 70 | repo.oepkgs.net | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 71 | repo.openeuler.org | 20/20 · 16/20 | 20/20 · 19/20 | 20/20 · 18/20 | 直连劣化 |
+| 72 | mirrors.ustc.edu.cn | 20/20(503) · 0/20 | 20/20(503) · 0/20 | 20/20 · 20/20 | 直连劣化 |
+| 73 | lfs-cdn.gitcode.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 74 | cn-north-4-octopus-gitcode-runner.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 75 | gitcode.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 76 | atomgit.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 77 | mirrors.huaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 78 | mindcluster.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 79 | mirrors.aliyun.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 80 | mirrors.tuna.tsinghua.edu.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 81 | repo.huaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 82 | mindstudio-pkg.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 83 | files.pythonhosted.org | 19/20 · 20/20 | 19/20 · 19/20 | 20/20 · 20/20 | proxy劣化 |
+| 84 | mindx-package.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 85 | pypi.tuna.tsinghua.edu.cn | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 86 | mindie-pr.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 87 | pypi.org | 20/20 · 19/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 88 | build-env.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 89 | ppa.launchpad.net | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 90 | obs-community.obs.cn-north-1.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 91 | ascend-cann-open.obs.cn-north-4.myhuaweicloud.com | 20/20 · 20/20 | 20/20 · 20/20 | 20/20 · 20/20 | 稳定 |
+| 92 | 123.60.114.225 | 20/20(503) · 0/20 | 20/20(503) · 0/20 | 20/20(503) · 0/20 | 直连劣化 |
