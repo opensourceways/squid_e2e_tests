@@ -1,0 +1,68 @@
+deploy/chart/values.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 8-12,25-28,39,84-99,114-116
+deploy/CACHE-STRATEGY.md
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 1-296
+deploy/chart/templates/configmap.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 19,52-76,83-84,92-95,98
+deploy/chart/templates/secret-definition.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 30-32
+deploy/chart/templates/service.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 16-20,41-44
+deploy/values-wlcb-001.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 1-94
+deploy/REGISTRY-EXPORTER-METRICS.md
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 1-229
+deploy/chart/templates/registry-exporter-configmap.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 1-193
+deploy/values-gy-001.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 1-96
+deploy/LOG-ROTATION.md
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 1-109
+deploy/values-006.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 25-29,31-32,37-39
+deploy/values-cn12-001.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 1-88
+deploy/UPGRADE-cn12-001.md
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 1-174
+deploy/DEPLOY.md
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 54,56,75-77,85-88,212-213,217-219,254-258,262-275,279,282-285
+deploy/SQUID-OVERVIEW.md
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 3-5,349,351,355-356
+deploy/VERIFICATION.md
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 3,27-28,78,83-141
+  s_3d34ba5e2b93e2::t_1646d094c5aefe 142
+deploy/values-gy-002.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 1-90
+deploy/chart/Chart.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 5-6
+deploy/chart/templates/statefulset.yaml
+  s_3d34ba5e2b93e2::t_3b8d36e5a19530 17-20,25-28,30-33,70,87-91,94,105,198-206,211-238,256-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "f48d465ddc2b7bc3839b540a27aeb54eab128691",
+  "prompts": {},
+  "sessions": {
+    "s_3d34ba5e2b93e2": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a996fc987857a3d21379a8b",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "operation_id": "6a9a0f0387857a3d21379e30",
+        "display_model_name": "DeepSeek-V4-Flash 正式版",
+        "client_type": "ide",
+        "session_id": "6a996fc987857a3d21379a8b",
+        "source_scene": "agent",
+        "edit_kind": "bash",
+        "runtime_client": "trae-tob-git-ai",
+        "external_session_id": "6a996fc987857a3d21379a8b",
+        "tool_name": "RunCommand",
+        "tool_use_id": "6a9a0f0387857a3d21379e30"
+      }
+    }
+  }
+}
