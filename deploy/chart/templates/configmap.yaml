@@ -89,9 +89,13 @@ data:
     pid_filename /var/run/squid/squid.pid
 
     # ── 超时设置（支持 5GB+ 大镜像下载）──
+    # connect_timeout 5s: 多 IP 顺序 failover 需在客户端超时预算(典型 curl --max-time 6)内
+    # 完成"判死坏 IP→换下一个→建连"；原 2 minutes 判死过慢导致 proxy 路径系统性劣于直连
+    # (A/B 实测与机理见 domaintest/REPORT-proxy-vs-direct.md、REPORT-connect-timeout-ab.md)
+    # dns_v4_first 在 Squid 7 已废弃(地址族回退自动化)，不配置；IPv6 挂起由 5s 超时兜底
     read_timeout 30 minutes
     write_timeout 30 minutes
-    connect_timeout 2 minutes
+    connect_timeout 5 seconds
     request_timeout 10 minutes
 
     # ── 禁止 quick_abort（防大文件传输中途截断）──

@@ -195,10 +195,15 @@ spec:
           mountPath: /ca
         - name: registry-cache
           mountPath: /docker_mirror_cache
+        {{- if .Values.registryProxy.exporter.enabled }}
+        # 仅当 registry-exporter 启用时才覆盖挂载 nginx 日志目录（与下方 volumes 中
+        # nginx-access-log 的 emptyDir 条件一致）；否则 access.log 走镜像默认 /dev/stdout，
+        # 避免出现"mount 引用了不存在的 volume"导致 StatefulSet 校验失败。
         - name: nginx-access-log
           # 覆盖镜像里的 access.log->/dev/stdout 符号链接，让 nginx 把 access_log 写成真实文件，
           # 供 registry-exporter 增量解析出 requests/hits/bytes 等计数指标（见 registry-exporter-configmap.yaml）
           mountPath: /var/log/nginx
+        {{- end }}
         resources:
           {{- toYaml .Values.registryProxy.resources | nindent 10 }}
       {{- end }}
