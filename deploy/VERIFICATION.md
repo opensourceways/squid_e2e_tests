@@ -1,6 +1,6 @@
 # 部署与监控验证记录（gy-006 集群）
 
-> 记录 squid-rpardini 在 gy006 的部署状态与监控接线过程。最后更新：2026-08-11。
+> 记录 squid-rpardini 在 gy006 的部署状态与监控接线过程。最后更新：2026-08-31。
 
 ## 1. 部署状态（已上线）
 
@@ -24,6 +24,8 @@ kubectl --kubeconfig ~/.kube/gy-006.yaml -n squid get pods -l app=squid-cache -o
 ```
 squid-cache.squid:9301 (squid-exporter, 双活各一个)
         │ prometheus-agent scrape（job: squid, 60s）
+squid-cache.squid:9302 (registry-exporter, 双活各一个)
+        │ prometheus-agent scrape（job: registry-proxy, 60s）
         ▼
 中央 Prometheus http://113.44.182.82:9090  ← remote_write（basic_auth: agent）
 ```
@@ -73,10 +75,70 @@ rate(squid_client_http_kbytes_out_kbytes_total{job="squid"}[5m])
 
 # 回源带宽 KB/s（缓存节省量）
 rate(squid_server_http_kbytes_in_kbytes_total{job="squid"}[5m])
-
+/ rate(squid_client_http_kbytes_out_kbytes_total{job="squid"}[5m])
 # 双副本请求分布
 sum by (instance) (squid_client_http_requests_total{job="squid"})
 ```
+
+### 2.5 registry-proxy 指标采集（9302，待接线）
+
+rpardini 无原生 /metrics，chart 内已部署 **registry-exporter** sidecar（端口 9302，
+指标前缀 `registry_proxy_*`，设计见 `REGISTRY-EXPORTER-METRICS.md`，日志膨胀控制见
+`LOG-ROTATION.md`）。已实测 `/metrics` 正常（增量解析 nginx access.log 出
+requests/errors/hits/misses/bytes_out/状态码分布 + 缓存 blob 数/磁盘水位）。
+
+**① 修改 agent ConfigMap**，在 `scrape_configs` 里 `squid` job 后加（headless DNS，双活
+两副本独立计数、`rate()` 不串实例）：
+
+```yaml
+      - job_name: registry-proxy
+        static_configs:
+          - targets:
+              # headless DNS: 与 squid 同款, 每副本独立 exporter (counter 独立, rate 不串实例)
+              - squid-cache-0.squid-cache-headless.squid:9302
+              - squid-cache-1.squid-cache-headless.squid:9302
+            labels:
+              cluster: guiyang-006
+```
+
+```bash
+kubectl --kubeconfig ~/.kube/gy-006.yaml -n monitoring edit cm prometheus-agent-config
+```
+
+**② 热加载 + 验证**（ConfigMap 更新不自动生效，见 §2.2）：
+
+```bash
+kubectl --kubeconfig ~/.kube/gy-006.yaml -n monitoring exec <prometheus-agent-pod> -- \
+  wget -qO- --post-data="" "http://127.0.0.1:9090/-/reload"
+
+# 运行配置已含 registry-proxy（应为 1）
+kubectl --kubeconfig ~/.kube/gy-006.yaml -n monitoring exec <prometheus-agent-pod> -- \
+  wget -qO- "http://127.0.0.1:9090/api/v1/status/config" | grep -c "job_name: registry-proxy"
+
+# 两个 target 均 UP
+kubectl --kubeconfig ~/.kube/gy-006.yaml -n monitoring exec <prometheus-agent-pod> -- \
+  wget -qO- "http://127.0.0.1:9090/api/v1/targets" | grep -A2 "registry-proxy"
+```
+
+**③ 常用 PromQL**（中央 `http://113.44.182.82:9090/query`）：
+
+```promql
+# 镜像缓存命中率（5m）
+sum(rate(registry_proxy_http_hits_total{job="registry-proxy"}[5m]))
+  / sum(rate(registry_proxy_http_requests_total{job="registry-proxy"}[5m]))
+
+# 回源（未命中）压力
+sum(rate(registry_proxy_http_misses_total{job="registry-proxy"}[5m]))
+
+# 磁盘水位告警（>0.9 告警；sfsturbo 共享盘见 REGISTRY-EXPORTER-METRICS.md §7-4 口径）
+registry_proxy_cache_usage_ratio > 0.9
+
+# 双副本请求分布（对比 0/1 负载）
+sum by (instance) (registry_proxy_http_requests_total{job="registry-proxy"})
+```
+
+> ⚠️ 口径差异：squid 主代理的 registry 流量走 splice（TCP_TUNNEL），**不计入**
+> `squid_client_http_*`；镜像缓存效果**只能**看 `registry_proxy_*` 这组指标。
 
 ## 3. 集群出口带宽（可选，无需新组件）
 

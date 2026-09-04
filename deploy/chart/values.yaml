@@ -5,6 +5,11 @@ namespace: squid
 # if one pod dies the other keeps serving - no failover window.
 replicas: 2
 nodeSelector: {}
+nodeAffinity: {}
+
+# Image pull secrets (e.g. huawei-swr-image-pull-secret-model-gy) for pulling
+# images from the private SWR registry.
+imagePullSecrets: []
 
 # Probe tuning. readiness drives Service endpoint membership, so keep it
 # fast: 5s x 2 = worst-case ~10s to drop a dead endpoint (HTTP cachemgr
@@ -17,8 +22,10 @@ probes:
 
 images:
   squid:
-    repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine
-    tag: "3.23.3"
+    repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/squid-cache/squid
+    tag: "v7.7.1"
+    # 默认 IfNotPresent；需要强制拉最新镜像的集群（如 006 自建镜像调试期）覆写为 Always
+    imagePullPolicy: IfNotPresent
   registryProxy:
     repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/rpardini/docker-registry-proxy
     tag: "0.6.5"
@@ -29,7 +36,7 @@ images:
     repository: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/boynux/squid-exporter
     tag: "v1.13.0"
 
-alpineMirror: "https://mirrors.ustc.edu.cn/alpine/v3.23"
+alpineMirror: "https://mirrors.huaweicloud.com/alpine/v3.23"
 
 squid:
   cacheMemory: 512
@@ -74,6 +81,22 @@ registryProxy:
     limits:
       cpu: 2
       memory: 2Gi
+  # registry-proxy 缓存指标 exporter：增量解析 nginx access.log（经 emptyDir 覆盖挂载 /var/log/nginx 转成真实文件）
+  # 出 requests/errors/hits/misses/bytes_out/状态码分布，叠加只读缓存卷的 blob 数/磁盘水位。
+  # 注：日志无 request_length，故无 bytes_in；详见 registry-exporter-configmap.yaml
+  exporter:
+    enabled: false
+    listenPort: 9302
+    interval: 30
+    # 日志行数阈值，超过即轮转（清空已全部解析的 access.log），上限约 30~40MB
+    maxLogLines: 100000
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
 
 # Per-pod cache PVCs (created via volumeClaimTemplates). Each replica has
 # its own RWO volume - no shared write path, no arbitration needed.
@@ -88,8 +111,9 @@ persistence:
 secretDefinition:
   enabled: false
   vaultPath: secrets/data/ascend/ci
-  caBundleKey: squid_ca_bundle_pem
-  caPublicKey: squid_ca_pem
+  caBundleKey: squid_ca_bundle_v3_pem
+  caPublicKey: squid_ca_v3_pem
+  caTruststoreKey: squid_bazel_trust_v3_jks
   caNamespaces: []
   # - buildkitd
   # - ascend-gha-runners

@@ -1,0 +1,193 @@
+# registry-proxy (rpardini, nginx-based) 缓存指标 exporter。
+#
+# 背景：rpardini/docker-registry-proxy 没有原生 Prometheus /metrics（实测 /metrics 只是 banner）。
+# 镜像内 access.log 符号链接到 /dev/stdout，无法在 pod 内作为文件读取；
+# 故 chart 用 emptyDir 覆盖挂载 /var/log/nginx，让 nginx 把 access_log（log_format tweaked，JSON）
+# 写成真实文件，exporter 增量解析该日志得到请求/命中/字节等计数，并叠加只读缓存卷的存储指标：
+#   - registry_proxy_http_requests_total / _errors_total / _hits_total / _misses_total
+#   - registry_proxy_http_kbytes_out_total（body_bytes_sent）
+#   - registry_proxy_http_responses_total{code}（2xx/3xx/4xx/5xx）
+#   - registry_proxy_cache_*（blob 数 / .tmp 下载中 / 磁盘水位 vs max_size）
+# 注：nginx 日志未记录 request_length，故无 bytes_in 指标。
+#
+# 实现：busybox nc 一次性 HTTP 服务——快循环（每 INTERVAL 秒）增量解析日志 + df 取存储水位，写 /metrics/metrics，
+# 每次连接由 nc 吐出该文件，Prometheus scrape /metrics 即得。复用 images.initContainer 的 alpine 镜像。
+# 注：该 alpine 的 busybox 编译未含 httpd applet（实测 "httpd: applet not found"），故用 nc 起服务。
+# blob 文件数（find 大缓存很慢）由低频后台循环（每 BLOB_INTERVAL 秒）采样并落盘。
+# 计数/偏移状态存于共享 emptyDir（/var/log/nginx/.exporter.*），exporter 容器重启不丢，pod 重启归零。
+# 注意：load_state 在计数器文件缺失时必须返回 0（文件首次不存在），否则 set -e 会静默 exit 1。
+# 日志膨胀控制：nginx 容器内无 logrotate、emptyDir 无自动清理，access.log 会无限增长——
+# 故 update_log 在「文件行数超 MAX_LOG_LINES 且已全部解析（offset 已追平）」时清空 access.log 并重置
+# offset（nginx 以 O_APPEND 打开，truncate 后从文件末尾续写，无空洞），顺带清空 error.log。
+# 此时文件内所有行都已计入计数，清空不丢数据；offset 归 0 后只重读 truncate 之后的新行，不重复计数。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registry-exporter-script
+  namespace: {{ .Values.namespace }}
+data:
+  exporter.sh: |
+    #!/bin/sh
+    # registry-proxy 缓存指标 exporter（busybox httpd 静态文件式）
+    set -e
+
+    CACHE_DIR="${CACHE_DIR:-/docker_mirror_cache}"
+    LOG_FILE="${ACCESS_LOG:-/var/log/nginx/access.log}"
+    STATE_DIR="$(dirname "$LOG_FILE")"
+    OFFSET_FILE="$STATE_DIR/.exporter.offset"
+    COUNTERS_FILE="$STATE_DIR/.exporter.counters"
+    BLOB_STATE="$STATE_DIR/.exporter.blobs"
+    INTERVAL="${REGISTRY_EXPORTER_INTERVAL:-30}"
+    BLOB_INTERVAL="${REGISTRY_EXPORTER_BLOB_INTERVAL:-600}"
+    # 日志行数超过该阈值即轮转（清空已全部解析的 access.log），上限约 100000 行 ≈ 30~40MB
+    MAX_LOG_LINES="${REGISTRY_EXPORTER_MAX_LOG_LINES:-100000}"
+    DOCROOT="${DOCROOT:-/metrics}"
+    OUT="$DOCROOT/metrics"
+    ERROR_LOG="$(dirname "$LOG_FILE")/error.log"
+
+    # 解析 "100g"/"150m"/"200k"/纯数字 → 字节
+    parse_size() {
+      case "$1" in
+        *[gG]) echo $(( ${1%[gG]} * 1024 * 1024 * 1024 )) ;;
+        *[mM]) echo $(( ${1%[mM]} * 1024 * 1024 )) ;;
+        *[kK]) echo $(( ${1%[kK]} * 1024 )) ;;
+        *)     echo "${1:-0}" ;;
+      esac
+    }
+    MAX_BYTES=$(parse_size "${REGISTRY_CACHE_MAX:-100g}")
+
+    # 计数初值（请求/出字节kB/错误/命中/未命中/2xx/3xx/4xx/5xx）
+    REQ=0; KBYTES_OUT=0; ERR=0; HIT=0; MISS=0; C2=0; C3=0; C4=0; C5=0
+    # 慢采样：blob 文件数 / .tmp 下载中文件数
+    BLOBS=0; TMP=0
+
+    # 注意：文件不存在时必须整体返回 0，避免 set -e 静默退出
+    load_state() { [ ! -f "$COUNTERS_FILE" ] || . "$COUNTERS_FILE"; }
+    save_state() {
+      printf 'REQ=%s\nKBYTES_OUT=%s\nERR=%s\nHIT=%s\nMISS=%s\nC2=%s\nC3=%s\nC4=%s\nC5=%s\n' \
+        "$REQ" "$KBYTES_OUT" "$ERR" "$HIT" "$MISS" "$C2" "$C3" "$C4" "$C5" > "$COUNTERS_FILE"
+    }
+    load_blob_state() { [ ! -f "$BLOB_STATE" ] || . "$BLOB_STATE"; }
+    save_blob_state() { printf 'BLOBS=%s\nTMP=%s\n' "$BLOBS" "$TMP" > "$BLOB_STATE"; }
+
+    # 增量解析 access.log 新增行，输出增量: REQ KBYTES ERR HIT MISS C2 C3 C4 C5
+    parse_delta() {
+      tail -n +$1 "$LOG_FILE" 2>/dev/null | awk '
+        function v(k) {
+          # 取 "k":"value"；status/bytes/upstream_cache_status 均为简单值，无转义引号
+          if (match($0, "\"" k "\":\"[^\"]*\"")) {
+            return substr($0, RSTART + length(k) + 4, RLENGTH - length(k) - 5)
+          }
+          return ""
+        }
+        {
+          st = v("status"); bs = v("bytes_sent"); cs = v("upstream_cache_status")
+          req++
+          if (bs ~ /^[0-9]+$/) bytes += bs
+          if (st ~ /^[0-9]+$/) {
+            if (st >= 400) err++
+            s = int(st / 100)
+            if (s == 2) c2++; else if (s == 3) c3++; else if (s == 4) c4++; else if (s == 5) c5++
+          }
+          if (cs == "HIT") hit++
+          else if (cs != "") miss++
+        }
+        END { printf "%d %d %d %d %d %d %d %d %d\n", req, bytes/1024, err, hit, miss, c2, c3, c4, c5 }
+      '
+    }
+
+    update_log() {
+      local n offset delta
+      n=$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)
+      offset=$(cat "$OFFSET_FILE" 2>/dev/null || echo 0)
+      [ "$offset" -gt "$n" ] && offset=0
+      if [ "$offset" -lt "$n" ]; then
+        delta=$(parse_delta $((offset + 1)))
+        echo "$n" > "$OFFSET_FILE"
+        set -- $delta
+        REQ=$((REQ + ${1:-0}));    KBYTES_OUT=$((KBYTES_OUT + ${2:-0}))
+        ERR=$((ERR + ${3:-0}));    HIT=$((HIT + ${4:-0})); MISS=$((MISS + ${5:-0}))
+        C2=$((C2 + ${6:-0}));      C3=$((C3 + ${7:-0}));  C4=$((C4 + ${8:-0})); C5=$((C5 + ${9:-0}))
+        save_state
+      fi
+      # 轮转：行数超阈值即清空（若未解析完，上面已先解析并追平 offset，故清空的是已计入计数的行）。
+      # 重置 offset=0 后只重读 truncate 之后的新行，不重复计数。error.log 顺带清空（错误日志可丢）。
+      if [ "$n" -gt "$MAX_LOG_LINES" ]; then
+        : > "$LOG_FILE"
+        : > "$ERROR_LOG" 2>/dev/null || true
+        echo 0 > "$OFFSET_FILE"
+      fi
+      return 0
+    }
+
+    # 低频慢采样：大缓存上 find 很慢，只在后台每 BLOB_INTERVAL 秒跑一次
+    slow_sample() {
+      BLOBS=$(find "$CACHE_DIR" -type f ! -name '*.tmp' 2>/dev/null | wc -l)
+      TMP=$(find "$CACHE_DIR" -type f -name '*.tmp' 2>/dev/null | wc -l)
+      save_blob_state
+    }
+
+    write_metrics() {
+      local bytes ratio
+      # 存储水位用 df（瞬时），blob 数用慢采样缓存值
+      bytes=$(df -P "$CACHE_DIR" 2>/dev/null | awk 'NR==2{print $3*1024}')
+      bytes=${bytes:-0}
+      if [ "$MAX_BYTES" -gt 0 ] 2>/dev/null; then
+        ratio=$(awk -v b="$bytes" -v m="$MAX_BYTES" 'BEGIN { printf "%.4f", b/m }')
+      else
+        ratio="0.0000"
+      fi
+
+      {
+        echo "# HELP registry_proxy_http_requests_total Number of HTTP requests received by the registry proxy"
+        echo "# TYPE registry_proxy_http_requests_total counter"
+        echo "registry_proxy_http_requests_total $REQ"
+        echo "# HELP registry_proxy_http_kbytes_out_total Total response body bytes sent by the registry proxy (kB)"
+        echo "# TYPE registry_proxy_http_kbytes_out_total counter"
+        echo "registry_proxy_http_kbytes_out_total $KBYTES_OUT"
+        echo "# HELP registry_proxy_http_errors_total Number of HTTP responses with status >= 400"
+        echo "# TYPE registry_proxy_http_errors_total counter"
+        echo "registry_proxy_http_errors_total $ERR"
+        echo "# HELP registry_proxy_http_hits_total Number of cache hits (upstream_cache_status=HIT)"
+        echo "# TYPE registry_proxy_http_hits_total counter"
+        echo "registry_proxy_http_hits_total $HIT"
+        echo "# HELP registry_proxy_http_misses_total Number of upstream fetches (upstream_cache_status not HIT)"
+        echo "# TYPE registry_proxy_http_misses_total counter"
+        echo "registry_proxy_http_misses_total $MISS"
+        echo "# HELP registry_proxy_http_responses_total HTTP responses by status class"
+        echo "# TYPE registry_proxy_http_responses_total counter"
+        echo "registry_proxy_http_responses_total{code=\"2xx\"} $C2"
+        echo "registry_proxy_http_responses_total{code=\"3xx\"} $C3"
+        echo "registry_proxy_http_responses_total{code=\"4xx\"} $C4"
+        echo "registry_proxy_http_responses_total{code=\"5xx\"} $C5"
+        echo "# HELP registry_proxy_cache_blobs_total Number of cached blob files in the registry proxy cache (sampled)"
+        echo "# TYPE registry_proxy_cache_blobs_total gauge"
+        echo "registry_proxy_cache_blobs_total $BLOBS"
+        echo "# HELP registry_proxy_cache_tmp_files_total Number of in-progress (.tmp) downloads in the cache (sampled)"
+        echo "# TYPE registry_proxy_cache_tmp_files_total gauge"
+        echo "registry_proxy_cache_tmp_files_total $TMP"
+        echo "# HELP registry_proxy_cache_bytes_total Total bytes used by the registry blob cache (from df)"
+        echo "# TYPE registry_proxy_cache_bytes_total gauge"
+        echo "registry_proxy_cache_bytes_total $bytes"
+        echo "# HELP registry_proxy_cache_max_bytes_total Cache max size in bytes (proxy_cache_path max_size)"
+        echo "# TYPE registry_proxy_cache_max_bytes_total gauge"
+        echo "registry_proxy_cache_max_bytes_total $MAX_BYTES"
+        echo "# HELP registry_proxy_cache_usage_ratio Cache usage ratio (bytes / max_bytes)"
+        echo "# TYPE registry_proxy_cache_usage_ratio gauge"
+        echo "registry_proxy_cache_usage_ratio $ratio"
+      } > "$OUT"
+    }
+
+    mkdir -p "$DOCROOT"
+    load_state; load_blob_state
+    update_log; write_metrics
+    ( while true; do sleep "$BLOB_INTERVAL"; slow_sample; done ) &
+    ( while true; do sleep "$INTERVAL"; update_log; write_metrics; done ) &
+
+    # busybox nc 一次性 HTTP 服务：nc 持续监听直到有连接，serve /metrics 后随连接关闭退出并重新监听。
+    # 不能用 -w（会让 nc 空等超时每秒关闭，产生拒连窗口）；该 alpine 的 busybox 无 httpd applet
+    while true; do
+      if ! { printf 'HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nConnection: close\r\n\r\n'; cat "$OUT"; } | nc -l -p "${LISTEN_ADDR:-9302}"; then
+        sleep 1
+      fi
+    done
