@@ -14,11 +14,23 @@ spec:
       labels:
         app: squid-cache
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       affinity:
+        {{- with .Values.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
           - weight: 100
@@ -55,6 +67,7 @@ spec:
       containers:
       - name: squid
         image: {{ .Values.images.squid.repository }}:{{ .Values.images.squid.tag }}
+        imagePullPolicy: {{ .Values.images.squid.imagePullPolicy | default "IfNotPresent" }}
         ports:
         - containerPort: 3129
           name: proxy
@@ -71,17 +84,14 @@ spec:
         - /bin/sh
         - -c
         - |
-          MIRROR={{ .Values.alpineMirror }}
-          cat > /etc/apk/repositories <<EOF
-          $MIRROR/main
-          $MIRROR/community
-          EOF
-
-          apk add --no-cache squid openssl python3 ca-certificates curl
-
+          # 自建镜像（基于 squid-cache/squid 构建，squid 装到 /usr/local/squid，squid 用户 uid/gid=31）
+          # 镜像已内置 squid 及依赖，无需 apk 安装；注意不是官方 squid-cache/squid 镜像。
+          # squid 二进制编译默认 cache_log=/var/logs/cache.log（该目录不存在），
+          # 必须显式指定到 /var/log/squid 并先建目录，否则 squid -z / squid 启动会失败。
+          mkdir -p /var/log/squid
           if [ -f /etc/squid/ssl_cert/squid-ca-bundle.pem ]; then
             if [ ! -d /var/cache/squid-ssl-db ]; then
-              /usr/lib/squid/security_file_certgen \
+              /usr/local/squid/libexec/security_file_certgen \
                 -c -s /var/cache/squid-ssl-db -M 8MB
               chown -R squid:squid /var/cache/squid-ssl-db 2>/dev/null || true
             fi
@@ -92,14 +102,13 @@ spec:
             [ -d /var/spool/squid/$i ] || MISSING=1
           done
           if [ "$MISSING" = "1" ]; then
-            printf 'cache_dir ufs /var/spool/squid {{ .Values.squid.cacheDiskSize }} 16 8\npid_filename /tmp/squid-init.pid\n' > /tmp/squid-init.conf
+            printf 'cache_dir ufs /var/spool/squid {{ .Values.squid.cacheDiskSize }} 16 8\npid_filename /tmp/squid-init.pid\ncache_log /var/log/squid/cache.log\n' > /tmp/squid-init.conf
             squid -z -f /tmp/squid-init.conf 2>&1 || true
             rm -f /tmp/squid-init.pid 2>/dev/null || true
           fi
 
           rm -f /run/squid.pid /var/run/squid.pid /var/run/squid/squid.pid 2>/dev/null || true
 
-          mkdir -p /var/log/squid
           tail -F /var/log/squid/access.log &
           tail -F /var/log/squid/cache.log >&2 &
 
@@ -186,8 +195,45 @@ spec:
           mountPath: /ca
         - name: registry-cache
           mountPath: /docker_mirror_cache
+        {{- if .Values.registryProxy.exporter.enabled }}
+        # 仅当 registry-exporter 启用时才覆盖挂载 nginx 日志目录（与下方 volumes 中
+        # nginx-access-log 的 emptyDir 条件一致）；否则 access.log 走镜像默认 /dev/stdout，
+        # 避免出现"mount 引用了不存在的 volume"导致 StatefulSet 校验失败。
+        - name: nginx-access-log
+          # 覆盖镜像里的 access.log->/dev/stdout 符号链接，让 nginx 把 access_log 写成真实文件，
+          # 供 registry-exporter 增量解析出 requests/hits/bytes 等计数指标（见 registry-exporter-configmap.yaml）
+          mountPath: /var/log/nginx
+        {{- end }}
         resources:
           {{- toYaml .Values.registryProxy.resources | nindent 10 }}
+      {{- end }}
+
+      {{- if and .Values.registryProxy.enabled .Values.registryProxy.exporter.enabled }}
+      - name: registry-exporter
+        image: {{ .Values.images.initContainer.repository }}:{{ .Values.images.initContainer.tag }}
+        command: ["/bin/sh", "/script/exporter.sh"]
+        ports:
+        - containerPort: {{ .Values.registryProxy.exporter.listenPort }}
+          name: regmetrics
+        env:
+        - name: REGISTRY_CACHE_MAX
+          value: {{ .Values.registryProxy.cacheMaxSize | quote }}
+        - name: REGISTRY_EXPORTER_INTERVAL
+          value: {{ .Values.registryProxy.exporter.interval | quote }}
+        - name: REGISTRY_EXPORTER_MAX_LOG_LINES
+          value: {{ .Values.registryProxy.exporter.maxLogLines | quote }}
+        volumeMounts:
+        - name: registry-exporter-script
+          mountPath: /script
+          readOnly: true
+        - name: registry-cache
+          mountPath: /docker_mirror_cache
+          readOnly: true
+        - name: nginx-access-log
+          # 与 registry-proxy 共享 nginx access.log（真实文件），并在此存 exporter 计数/偏移状态
+          mountPath: /var/log/nginx
+        resources:
+          {{- toYaml .Values.registryProxy.exporter.resources | nindent 10 }}
       {{- end }}
 
       volumes:
@@ -206,6 +252,18 @@ spec:
       {{- if .Values.registryProxy.enabled }}
       - name: registry-ca
         emptyDir: {}
+      {{- end }}
+      {{- if and .Values.registryProxy.enabled .Values.registryProxy.exporter.enabled }}
+      - name: registry-exporter-script
+        configMap:
+          name: registry-exporter-script
+      {{- end }}
+      {{- if and .Values.registryProxy.enabled .Values.registryProxy.exporter.enabled }}
+      - name: nginx-access-log
+        # 上限 128Mi 兜底：exporter 每 30s 轮转日志，正常情况下远达不到该值；
+        # 若轮转失效，emptyDir 撑满会触发 pod 驱逐（eviction），避免无限增长打满节点磁盘
+        emptyDir:
+          sizeLimit: 128Mi
       {{- end }}
   volumeClaimTemplates:
   - metadata:

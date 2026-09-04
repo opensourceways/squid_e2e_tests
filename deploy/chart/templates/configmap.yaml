@@ -16,7 +16,7 @@ data:
     visible_hostname squid-cache
 
     # ── SSL 证书生成器 ──
-    sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/cache/squid-ssl-db -M 8MB
+    sslcrtd_program /usr/local/squid/libexec/security_file_certgen -s /var/cache/squid-ssl-db -M 8MB
     sslcrtd_children 8 startup=1 idle=1
 
     # ── SSL Bump 规则 ──
@@ -49,24 +49,39 @@ data:
     maximum_object_size {{ .Values.squid.maxObjectSize }} MB
 
     # ── 缓存策略 ──
-    refresh_pattern -i \.whl$  10080 100% 525960 ignore-reload override-expire ignore-no-cache
-    refresh_pattern -i \.tar\.gz$ 10080 100% 525960 ignore-reload override-expire ignore-no-cache
-    refresh_pattern -i \.deb$  10080 100% 525960 ignore-reload override-expire ignore-no-cache
-    refresh_pattern -i repo\.huaweicloud\.com/.*/simple/ 0 20% 4320 ignore-private ignore-reload override-vary
-    refresh_pattern -i mirrors\.tuna\.tsinghua\.edu\.cn/.*/simple/ 0 20% 4320 ignore-private ignore-reload override-vary
-    refresh_pattern -i .pypi.org/.* 0 20% 4320 ignore-private
-    refresh_pattern -i .pythonhosted.org/.* 0 20% 4320 ignore-private
-    refresh_pattern -i .golang.org/.* 0 20% 4320 ignore-private
-    refresh_pattern -i proxy.golang.org/.* 0 20% 4320 ignore-private
-    refresh_pattern -i .docker.io/.* 0 20% 4320 ignore-private
-    refresh_pattern -i .debian.org/.* 0 20% 4320 ignore-private
-    refresh_pattern -i .ubuntu.com/.* 0 20% 4320 ignore-private
+    # Immutable build artifacts: never revalidate, ignore client reloads,
+    # ignore origin Expires/max-age and no-store. NOTE (verified on squid 7.6):
+    #   - ignore-no-cache was REMOVED in squid 4+ (no-op, origin no-cache is
+    #     enforced as must-revalidate) — do not re-add it.
+    #   - override-vary is unknown in 7.6 (logs ERROR) — do not re-add it.
+    #   - override-expire/ignore-reload/ignore-private/ignore-no-store are
+    #     legacy-but-effective (squid logs a "violates HTTP" WARNING).
+    #   - immutable 资格只给「内容寻址 + 源站不可覆盖」(A类) 对象；
+    #     ref 寻址/可覆盖 (B类) 走短 TTL（见 CACHE-STRATEGY.md §7）。
+    refresh_pattern -i \.whl$  10080 100% 525600 ignore-reload override-expire ignore-no-store
+    refresh_pattern -i \.crate$ 10080 100% 525600 ignore-reload override-expire ignore-no-store
+    refresh_pattern -i \.deb$  10080 100% 525600 ignore-reload override-expire ignore-no-store
+    # B 类可变内容（权重/分支归档）：尊重 LM 老化，不强制 fresh
+    refresh_pattern -i \.(pth|pt|safetensors)$ 0 20% 4320
+    refresh_pattern -i codeload\.github\.com/.*/refs/heads/ 0 20% 4320
+    refresh_pattern -i codeload\.github\.com/.*/refs/tags/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
+    refresh_pattern -i github\.com/.*/releases/download/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
+    # 索引/元数据（20% 老化匹配同步频率）
+    refresh_pattern -i repo\.huaweicloud\.com/.*/simple/ 0 20% 4320 ignore-private ignore-reload
+    refresh_pattern -i mirrors\.tuna\.tsinghua\.edu\.cn/.*/simple/ 0 20% 4320 ignore-private ignore-reload
+    refresh_pattern -i \.pypi\.org/.* 0 20% 4320 ignore-private
+    refresh_pattern -i \.golang\.org/.* 0 20% 4320 ignore-private
+    refresh_pattern -i proxy\.golang\.org/.* 0 20% 4320 ignore-private
+    refresh_pattern -i \.debian\.org/.* 0 20% 4320 ignore-private
+    refresh_pattern -i \.ubuntu\.com/.* 0 20% 4320 ignore-private
     refresh_pattern . 0 20% 4320
 
     # ── 响应头处理（消除 Vary: Origin 导致的缓存 miss）──
     reply_header_replace Vary Accept-Encoding
 
     # ── 日志（tail -F → kubectl logs 可见）──
+    # logfile_rotate 10：access.log / cache.log 各保留 10 份历史后轮转，防容器层日志无限膨胀
+    logfile_rotate 10
     access_log daemon:/var/log/squid/access.log
     cache_log /var/log/squid/cache.log
     cache_store_log none
@@ -74,9 +89,13 @@ data:
     pid_filename /var/run/squid/squid.pid
 
     # ── 超时设置（支持 5GB+ 大镜像下载）──
+    # connect_timeout 5s: 多 IP 顺序 failover 需在客户端超时预算(典型 curl --max-time 6)内
+    # 完成"判死坏 IP→换下一个→建连"；原 2 minutes 判死过慢导致 proxy 路径系统性劣于直连
+    # (A/B 实测与机理见 domaintest/REPORT-proxy-vs-direct.md、REPORT-connect-timeout-ab.md)
+    # dns_v4_first 在 Squid 7 已废弃(地址族回退自动化)，不配置；IPv6 挂起由 5s 超时兜底
     read_timeout 30 minutes
     write_timeout 30 minutes
-    connect_timeout 2 minutes
+    connect_timeout 5 seconds
     request_timeout 10 minutes
 
     # ── 禁止 quick_abort（防大文件传输中途截断）──
