@@ -1,0 +1,28 @@
+# 强制指定后端 IP，验证 .166(坏) vs .254(好) 的响应差异
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resolve-ip-test
+  namespace: squid
+spec:
+  nodeSelector:
+    kubernetes.io/arch: arm64
+  restartPolicy: Never
+  imagePullSecrets:
+  - name: huawei-swr-image-pull-secret-model-gy
+  containers:
+  - name: probe
+    image: harbor-portal.test.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+    command: ["/bin/sh","-c"]
+    args:
+    - |
+      U="https://gh-proxy.test.osinfra.cn/https://github.com/grpc/grpc/archive/refs/tags/v1.60.0.zip"
+      echo "=== A) 强制 -> 20.205.243.166 ==="
+      curl -s -o /dev/null -w 'code=%{http_code} loc=%{redirect_url}\n' --max-redirs 0 -k \
+        --resolve gh-proxy.test.osinfra.cn:443:20.205.243.166 "$U"
+      echo "=== B) 强制 -> 202.170.93.254 ==="
+      curl -s -o /dev/null -w 'code=%{http_code} loc=%{redirect_url}\n' --max-redirs 0 -k \
+        --resolve gh-proxy.test.osinfra.cn:443:202.170.93.254 "$U"
+      echo "=== C) 默认 DNS 解析 ==="
+      curl -s -o /dev/null -w 'code=%{http_code} loc=%{redirect_url}\n' --max-redirs 0 -k "$U"
+      echo "RESOLVE-DONE"

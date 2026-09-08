@@ -1,0 +1,31 @@
+# 最小决定性实验：完全绕过 squid，直连 gh-proxy 同一 URL ×5 + 新 URL，看是否 EVER 出 301/404
+apiVersion: v1
+kind: Pod
+metadata:
+  name: direct-ghproxy-only
+  namespace: squid
+spec:
+  nodeSelector:
+    kubernetes.io/arch: arm64
+  restartPolicy: Never
+  imagePullSecrets:
+  - name: huawei-swr-image-pull-secret-model-gy
+  containers:
+  - name: probe
+    image: harbor-portal.test.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+    command: ["/bin/sh","-c"]
+    args:
+    - |
+      # 不设任何 proxy env —— 完全无 squid
+      for i in 1 2 3 4 5; do
+        printf 'grpc  #%s: ' "$i"
+        curl -s -o /dev/null -w 'code=%{http_code} loc=%{redirect_url}\n' --max-redirs 0 \
+          "https://gh-proxy.test.osinfra.cn/https://github.com/grpc/grpc/archive/refs/tags/v1.60.0.zip"
+      done
+      printf 'numpy : '
+      curl -s -o /dev/null -w 'code=%{http_code} loc=%{redirect_url}\n' --max-redirs 0 \
+        "https://gh-proxy.test.osinfra.cn/https://github.com/numpy/numpy/archive/refs/tags/v1.26.0.zip"
+      printf 'tensorflow: '
+      curl -s -o /dev/null -w 'code=%{http_code} loc=%{redirect_url}\n' --max-redirs 0 \
+        "https://gh-proxy.test.osinfra.cn/https://github.com/tensorflow/tensorflow/archive/refs/tags/v2.15.0.zip"
+      echo "DIRECT-DONE"

@@ -245,12 +245,12 @@ never_direct allow foreign_src
 - **判定**：换成镜像域名后第 1 次是 MISS（旧官方 URL 缓存作废），第 2 次才 HIT——证明缓存键 = 完整 URL；分析 access.log 确认同一内容在缓存中存了两份（两个 URL 键）
 - **引申**：统计新旧两种 URL 的请求比例，评估"注入收敛"的必要性
 
-### S7. 新镜像域名未进 ssl_bump 白名单 → 丢失缓存（验证：联动成本缺点 6）
+### S7. registry splice 名单精确性（验证：bump all 下新域默认可缓存，误加 splice 则丢缓存）
 
-- **验证论点**：话题二"不更新白名单则新域名被 splice 直通，换源反而丢缓存"
-- **步骤**：在**生产配置形态**（域名白名单 splice，参考 PR#3 chart 写法）下，用白名单之外的镜像域名下载归档两次
-- **判定**：access.log 中该域名状态为 `TCP_TUNNEL`（splice 直通，不进 HTTP 缓存层），`registry_proxy_http_hits_total` 无增长——Squid 对它完全无感。随后把域名加入白名单，重复实验变 HIT
-- **注意**：需临时使用 `bump all` 的测试套件，或在 staging 集群验证，避免影响生产
+- **验证论点**：生产是 `bump all` + `registry` splice 黑名单（deploy/chart/templates/configmap.yaml L23-32），新镜像域名默认已被 bump 可缓存；真正的坑是 registry 名单误加/漏加（误加静态域 → 丢缓存；漏加 registry 域 → 镜像拉挂）
+- **步骤**：在测试套件（bump all）下用 `mirrors.huaweicloud.com` 下载归档两次 → 默认应 HIT；对照组：临时把该域加进 registry ACL 再试 → 变 `TCP_TUNNEL`（证明误加后果）
+- **判定**：默认 HIT（证明新域无需任何名单，`deploy/` 不用改）；误加 splice 后 `TCP_TUNNEL`（证明该名单是双刃剑）
+- **注意**：`registry` ACL 是生产慎改区（AGENTS.md ②），对照实验只在测试套件/staging 做，**生产 configmap 不动**
 
 ### S8. 镜像站故障的爆炸半径（验证：集中故障点缺点 5）
 
@@ -337,3 +337,126 @@ never_direct allow foreign_src
 | git | 维持客户端 insteadOf / gh-proxy，不指望 Squid 缓存 git |
 | BuildKit | 维持现有 [proxy] 三段链，如需换源在 Dockerfile/基镜像层做，Squid 层不介入 |
 | 兜底 | 仅对"改不了客户端"的第三方脚本按静态路径白名单局部启用 url_rewrite（见话题二） |
+
+---
+
+## 落地计划：vllm-ascend 换源 × Squid 缓存（Plan）
+
+> 针对 `vllm-benchmarks/Dockerfile.a3` 与 `Dockerfile.a3.openEuler` 的具体落地计划（2026-09-04 修订）。
+> 一句话设计：**客户端零换源（保持官方默认，不设任何镜像源），Squid 用 `url_rewrite` 把所有境外静态流量统一重定向到国内真镜像并缓存；registry/签名类流量保持 splice 不碰。**
+
+### 1. 目标
+
+1. **客户端零换源**：两个 Dockerfile 还原官方默认（不设任何镜像源），境外流量统一交给 Squid
+2. Squid 用 `url_rewrite` 把所有境外静态流量**集中重定向**到国内真镜像：`download.pytorch.org`、`archive/ports.ubuntu.com`、`repo.openeuler.org`、`pypi.org`、`github.com` archive 等
+3. 重定向后流量照常被 Squid 缓存（A 类静态源），二次构建 HIT
+4. 不破坏：pip 的 `+cpu` wheel 发现（`--extra-index-url` 保留官方 URL）、git Smart HTTP、registry token auth
+
+### 2. 三域分层（原则）
+
+| 域 | 职责 | 手段 | 谁 |
+|---|---|---|---|
+| 客户端/基镜像 | **保持官方默认，不换源**；只留 `--extra-index-url` 做 `+cpu` 发现 | 官方 URL 原样 | vllm Dockerfile（还原官方默认） |
+| Squid 代理层 | **统一重定向境外静态流量到国内真镜像** + 取货与缓存 | 确定性 url_rewrite（静态源全量）+ M3 cache_peer 可选 | squid_e2e_tests |
+| registry 层 | 基镜像拉取 | `m.daocloud.io/quay.io` 前缀 或 registry-proxy 按 digest 缓存 | runner / docker daemon |
+
+### 3. 境外源决策表（每个源走哪层）
+
+| 境外源 | 形态 | 客户端现有 | 处理（新） | 可缓存 |
+|---|---|---|---|---|
+| `download.pytorch.org/whl` | 静态直出(200) | `--extra-index-url`（官方，**保留**，`+cpu` 发现机制） | **客户端保持官方**，Squid rewrite → `repo.huaweicloud.com/pytorch/whl/`（路径 1:1） | ✅ A 类 |
+| `pypi.org` + `files.pythonhosted.org` | 索引 HTML + 包文件 | `PIP_INDEX_URL` 还原官方 pypi.org | **Squid rewrite → tuna 真镜像**（仅重写 `pypi.org/simple` 索引；对象 URL 随索引同源——tuna HTML 已改写为自身，**files 域不重写**，避免"官方索引×镜像文件"混源） | ✅ |
+| `archive/ports.ubuntu.com`（a3 版） | 静态直出(HTTP) | `APTMIRROR` 空（官方） | **Squid M1 rewrite** → `mirrors.huaweicloud.com/ubuntu|ubuntu-ports/` | ✅ |
+| `repo.openeuler.org`（openEuler 版） | 静态直出(HTTP) | **删掉 yum sed**（还原官方） | **Squid M1 rewrite** → `repo.huaweicloud.com/openeuler/` | ✅ |
+| `github.com` git clone（V3） | Smart HTTP | `GIT_PROXY` 空（官方直连） | M3 cache_peer 选路（换路不换键）；POST 协议不可缓存 | git 0%（archive ✅） |
+| `github.com` release/archive（V9） | 服务端302 | 官方直连 | Squid rewrite archive 静态路径 → gh-proxy（release 的 302 由 gh-proxy 跟随） | archive ✅ |
+| `quay.io` 基镜像 | registry + token auth | 无 | 不进代理层，走 registry 层 | blob 由 registry-proxy 缓存 |
+
+### 4. 改动清单
+
+#### 4.1 Dockerfile 改动（还原官方默认，换源全部交给 Squid）
+
+```dockerfile
+# 两个文件都改：把客户端换源配置还原为官方默认，境外流量由 Squid 统一重定向
+# PYTORCH_INDEX_URL：还原官方源（--extra-index-url 是 +cpu 发现机制，不能删，保持官方域名）
+ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu/"
+# a3/ubuntu：APTMIRROR 置空（官方 archive/ports.ubuntu.com），由 Squid rewrite 兜底
+ARG APTMIRROR=""
+# a3.openEuler：删掉 yum sed（还原官方 repo.openeuler.org），由 Squid rewrite 兜底
+# PIP_INDEX_URL：还原官方 pypi.org，由 Squid rewrite → tuna 真镜像
+# git：GIT_PROXY 留空（官方直连），github 容灾由 Squid M3 选路 / archive rewrite 兜底
+```
+
+- **还原为官方**：`PIP_INDEX_URL=pypi.org`、`PYTORCH_INDEX_URL=download.pytorch.org`（保留 `--extra-index-url` 发现机制）、删 yum sed、`APTMIRROR`/`GIT_PROXY` 置空
+- **保留（本就国内）**：`MOONCAKE/ASCEND_INDEX_URL`（已国内 + 发现机制）
+- **不动**：main2main 三路降级（运行时探测比静态 M3 更灵活）
+
+#### 4.2 Squid 侧（全量重定向 helper，确定性映射勿轮询）
+
+```sh
+#!/bin/sh
+# mirror-rewrite.sh：确定性兜底，同一 URL 永远映射同一镜像
+while read -r url; do
+  case "$url" in
+    https://download.pytorch.org/whl/*)
+      echo "OK rewrite-url=\"https://repo.huaweicloud.com/pytorch/whl/${url#*pytorch.org/whl/}\"" ;;
+    http://archive.ubuntu.com/ubuntu/*)
+      echo "OK rewrite-url=\"http://mirrors.huaweicloud.com/ubuntu/${url#*ubuntu.com/ubuntu/}\"" ;;
+    http://ports.ubuntu.com/*)
+      echo "OK rewrite-url=\"http://mirrors.huaweicloud.com/ubuntu-ports/${url#*ports.ubuntu.com/}\"" ;;
+    http://repo.openeuler.org/*)
+      echo "OK rewrite-url=\"http://repo.huaweicloud.com/openeuler/${url#*openeuler.org/}\"" ;;
+    https://pypi.org/simple/*)
+      echo "OK rewrite-url=\"https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/${url#*pypi.org/simple/}\"" ;;
+    # 注意：files.pythonhosted.org 对象域不重写（对象 URL 随索引同源；单独重写=官方索引×镜像文件混源，高风险）
+    https://codeload.github.com/*|https://github.com/*/archive/*)
+      echo "OK rewrite-url=\"https://gh-proxy.test.osinfra.cn/$url\"" ;;
+    *) echo "ERR" ;;
+  esac
+done
+```
+
+```squid
+# 只对静态归档域名开 rewrite，其余 deny 直连（避免"漏一个 case 就打境外"）
+acl rewritable dstdomain .download.pytorch.org .archive.ubuntu.com .ports.ubuntu.com \
+  .repo.openeuler.org .pypi.org .github.com .codeload.github.com
+url_rewrite_access allow rewritable
+url_rewrite_access deny all
+url_rewrite_program /usr/local/bin/mirror-rewrite.sh
+url_rewrite_children 10 startup=2 idle=1
+```
+
+M3（可选，给 github git 流量上容灾，换路不换键）：
+
+```squid
+cache_peer gh-proxy.test.osinfra.cn parent 443 0 round-robin
+acl github dstdomain .github.com
+never_direct allow github
+```
+
+#### 4.3 前置条件（漏一个就白做）
+
+1. **bump 覆盖（无需改任何名单）**：生产 squid.conf 是 `ssl_bump bump all` + `registry` splice 黑名单（deploy/chart/templates/configmap.yaml L23-32）。重写目标域（pytorch/pypi/ubuntu/openeuler/github）与**新镜像域名**（huaweicloud/tuna/gh-proxy）**默认已被 bump 解密、可直接缓存，`deploy/` 一行不用改**；唯一红线：新镜像域名绝不能误加进 `registry` splice 名单（该名单保持只含 6 个 registry 域，生产慎改区不动）
+2. **CA 信任**：rewrite 后走 Squid bump，自签 CA 给新域名签发证书——Dockerfile 已有 `PIP_CERT`/`SSL_CERT_FILE` 注入 MITM CA，git/apt 需同样注入
+3. **BuildKit proxy env**：构建期注入 `HTTP(S)_PROXY=squid`，否则流量不经过 Squid，兜底无从谈起
+4. **helper 确定性**：同一 URL 永远同一镜像，不轮询（S6 缓存键分裂教训）
+
+### 5. 验证（机器可判定）
+
+| 项 | 判定 |
+|---|---|
+| pytorch 兜底 | `access.log` 中 `download.pytorch.org` 消失、出现 `repo.huaweicloud.com/pytorch`；二次构建 `TCP_HIT` |
+| pypi 兜底 | `pypi.org`/`files.pythonhosted.org` 请求在 access.log 中变为 `mirrors.tuna.tsinghua.edu.cn`，二次构建 HIT |
+| 未破坏 pip | `pip install -e vllm[audio]` 成功拿到 `+cpu` wheel（`pip list | grep torch` 确认变体） |
+| apt 兜底 | a3 构建时 `apt-get update` 全程 `mirrors.huaweicloud.com`，二次构建 HIT |
+| openeuler 兜底 | a3.openEuler 构建中 `repo.openeuler.org` 被重写到 `repo.huaweicloud.com/openeuler`，yum 成功 |
+| github 容灾 | 复现断流窗口时 git clone 仍成功（走 gh-proxy/M3 路由） |
+
+### 6. 任务拆分
+
+- [ ] **T1** 客户端改动（还原官方默认）：`Dockerfile.a3` + `Dockerfile.a3.openEuler` 的 `PIP_INDEX_URL` 设回官方 `pypi.org`、删 yum sed、`APTMIRROR`/`GIT_PROXY` 置空；仅保留 `--extra-index-url https://download.pytorch.org/whl/cpu/`（连带更新构建配方中相关 ARG）
+- [ ] **T2** Squid 侧：部署**全量** `url_rewrite` helper（pypi.org / files.pythonhosted.org / download.pytorch.org / archive+ports.ubuntu.com / repo.openeuler.org / github archive → codeload/gh-proxy），`url_rewrite_access` ACL 限定域（先测试套件验证，再进生产 configmap；**不触碰 `ssl_bump`/`registry` 规则**）
+- [ ] **T3** 前置条件：BuildKit 注入 proxy env；CA 覆盖 git/apt（**deploy 的 registry splice 名单与 bump 规则保持不动**）
+- [ ] **T4** 验证：跑一轮 a3 + a3.openEuler 构建，核对"验证"表 6 项
+- [ ] **T5**（可选）M3 cache_peer 原型（S12）：真正向代理 parent + never_direct，验证 github 断流容灾且缓存键不变
+- [ ] **T6** 回归：全量 workflow（pr/main2main/schedule）确认无回归，域名归因表补齐

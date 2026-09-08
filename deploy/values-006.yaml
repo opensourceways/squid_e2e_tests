@@ -21,6 +21,10 @@ squid:
     limits:
       cpu: 2
       memory: 4Gi
+  # gy-006：开启境外静态流量 → 国内镜像的 url_rewrite 重定向（T2）
+  # 覆盖域见 chart/templates/configmap.yaml 的 mirror-rewrite.sh 头部注释
+  urlRewrite:
+    enabled: true
 
 images:
   squid:

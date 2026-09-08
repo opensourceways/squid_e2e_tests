@@ -31,6 +31,20 @@ data:
     ssl_bump splice registry
     ssl_bump bump all
 
+    # ── url_rewrite 境外→国内镜像重定向（由 squid.urlRewrite.enabled 开关）──
+    # 只把"静态下载域"的流量交给 helper 决定是否重写,其余 deny 直连。
+    # 前置约束: 目标域必须已被 ssl_bump 解密(bump all 默认覆盖),否则 helper 看不到路径。
+    # helper 返回 ERR 的请求原样回源(git Smart HTTP / 未匹配路径不受影响)。
+    # 映射表与覆盖域见同 ConfigMap 的 mirror-rewrite.sh 头部注释。
+    {{- if .Values.squid.urlRewrite.enabled }}
+    acl rewritable dstdomain .archive.ubuntu.com .ports.ubuntu.com \
+      .repo.openeuler.org .pypi.org .github.com .codeload.github.com
+    url_rewrite_access allow rewritable
+    url_rewrite_access deny all
+    url_rewrite_program /usr/local/bin/mirror-rewrite.sh
+    url_rewrite_children 10 startup=2 idle=1
+    {{- end }}
+
     # ── 访问控制 ──
     acl localnet src all
     http_access allow localnet
@@ -88,6 +102,13 @@ data:
 
     pid_filename /var/run/squid/squid.pid
 
+    # ── gh-proxy 域名固定解析（修订⑤：pin DNS 根治 301 翻倍）──
+    # 根因：squid 对 gh-proxy.test.osinfra.cn 的 DNS 间歇性落到 GitHub 边缘 IP 20.205.243.166，
+    #       畸形路径触发 301 Location 翻倍死循环（JUDGEMENT 3.3 修订②）。
+    # 处置：hosts_file 指向 static-hosts（ConfigMap 挂载），启动/重配置时加载为静态 ipcache 条目，
+    #       优先级高于 DNS 查询；IP 变更时需同步更新此文件（gh-proxy 单点风险见 SOLUTION.md A2）。
+    hosts_file /etc/squid/static-hosts
+
     # ── 超时设置（支持 5GB+ 大镜像下载）──
     # connect_timeout 5s: 多 IP 顺序 failover 需在客户端超时预算(典型 curl --max-time 6)内
     # 完成"判死坏 IP→换下一个→建连"；原 2 minutes 判死过慢导致 proxy 路径系统性劣于直连
@@ -102,3 +123,77 @@ data:
     quick_abort_min -1 KB
     quick_abort_max -1 KB
     quick_abort_pct 95
+  {{- if .Values.squid.urlRewrite.enabled }}
+  # url_rewrite helper：境外静态下载确定性重定向到国内真镜像（T2）
+  # 开启条件 squid.urlRewrite.enabled=true；由 statefulset 挂载到 /usr/local/bin/mirror-rewrite.sh
+  mirror-rewrite.sh: |
+    #!/bin/sh
+    # mirror-rewrite.sh — Squid url_rewrite helper：把境外静态下载确定性重定向到国内真镜像。
+    #
+    # 协议：stdin 每行一个请求 URL；匹配输出 `OK rewrite-url="..."`，否则输出 `ERR`（原样回源）。
+    # 关键约定：
+    #   1. 确定性映射 —— 同一 URL 永远映射到同一镜像，绝不轮询（否则 Squid 缓存键分裂，S6 教训）。
+    #   2. 只碰"无状态静态下载"（U1/U2）；git Smart HTTP（info/refs、git-upload-pack）与
+    #      其他未匹配路径一律 ERR 放行，绝不重写到不支持 Smart HTTP 的包镜像站。
+    #   3. 目标域必须已被 ssl_bump 解密（bump all 默认覆盖），否则 helper 看不到路径。
+    #
+    # 覆盖域：
+    #   - download.pytorch.org       → 不重写！官方可达且默认 bump 已缓存（gy-001/gy-006 实测 TCP_HIT）；
+    #                                 华为云 /pytorch/whl/ 无有效 PEP 503 索引（实测 403），重写索引会打断 pip；
+    #                                 仅"官方不可达"集群才启用 SJTU pytorch-wheels 路径手术备选
+    #                                 （见 redirect/SOURCE-REWRITE-ANALYSIS.md）
+    #   - pypi.org/simple            → mirrors.tuna.tsinghua.edu.cn/pypi/web/simple （真镜像，会重写 HTML 内链接）
+    #   - files.pythonhosted.org     → 不重写！对象 URL 必须与索引同源（tuna HTML 已改写为自身）；
+    #                                 单独重写对象域 = 官方索引×镜像文件的混源，同步一致性无保证（高风险）
+    #   - archive|ports.ubuntu.com   → mirrors.huaweicloud.com/ubuntu|ubuntu-ports
+    #   - repo.openeuler.org         → repo.huaweicloud.com/openeuler  （对齐 Dockerfile yum sed 语义）
+    #   - github.com/*（archive/releases/clone 全路径）→ gh-proxy（统一重写，修订⑤）
+    #   - codeload.github.com        → 不重写！保留官方直连 + refresh_pattern 长缓存（实测 TCP_HIT
+    #                                 3-4ms 最优；gh-proxy 白名单只放行 github.com，codeload 实测 403）
+    # squid 传给 url_rewrite helper 的输入是整行 `URL client_ip/fqdn method [myip myport]`，
+    # 必须丢弃第一字段后的附加字段，否则 $url 带尾部垃圾、重写 URL 畸形（gh-proxy 实测 301 循环叠加）。
+    while read -r url _; do
+      case "$url" in
+        # PyPI 索引页（tuna 真镜像，路径 /pypi/web/simple 与官方 /simple 对应）
+        # 对象 URL 随索引同源：tuna HTML 已把 wheel 链接改写成自身，下载直接走 tuna，
+        # files.pythonhosted.org 不会出现在请求流里。
+        https://pypi.org/simple/*)
+          echo "OK rewrite-url=\"https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/${url#*pypi.org/simple/}\""
+          ;;
+        # Ubuntu（a3/ubuntu 版）：archive/ports 都兜，http/https 都兜
+        http://archive.ubuntu.com/ubuntu/*)
+          echo "OK rewrite-url=\"http://mirrors.huaweicloud.com/ubuntu/${url#*ubuntu.com/ubuntu/}\""
+          ;;
+        https://archive.ubuntu.com/ubuntu/*)
+          echo "OK rewrite-url=\"https://mirrors.huaweicloud.com/ubuntu/${url#*ubuntu.com/ubuntu/}\""
+          ;;
+        http://ports.ubuntu.com/*)
+          echo "OK rewrite-url=\"http://mirrors.huaweicloud.com/ubuntu-ports/${url#*ports.ubuntu.com/}\""
+          ;;
+        https://ports.ubuntu.com/*)
+          echo "OK rewrite-url=\"https://mirrors.huaweicloud.com/ubuntu-ports/${url#*ports.ubuntu.com/}\""
+          ;;
+        # openEuler（对齐 yum sed：host 替换为 repo.huaweicloud.com/openeuler）
+        http://repo.openeuler.org/*)
+          echo "OK rewrite-url=\"http://repo.huaweicloud.com/openeuler/${url#*openeuler.org/}\""
+          ;;
+        https://repo.openeuler.org/*)
+          echo "OK rewrite-url=\"https://repo.huaweicloud.com/openeuler/${url#*openeuler.org/}\""
+          ;;
+        # GitHub 统一重写（修订⑤：用户决定"keep redirect simple"）：
+        #   github.com/*（archive/releases/clone 全路径）→ gh-proxy，
+        #   302 链（archive→codeload、releases→release-assets）由 gh-proxy 服务端消化，
+        #   客户端拿到确定性 URL，squid 可长缓存；root-cause 的 DNS 间歇污染由 hosts_file pin 根治。
+        # codeload.github.com 不匹配 → ERR 原样回源（保留官方直连 + refresh_pattern 长缓存）。
+        # 前置：gh-proxy 域名必须 pin 到 202.170.93.254（见 squid.conf hosts_file + static-hosts），
+        #       否则 squid DNS 间歇落到 .166 会复现 301 翻倍死循环（JUDGEMENT 3.3 修订②/⑤）。
+        https://github.com/*)
+          echo "OK rewrite-url=\"https://gh-proxy.test.osinfra.cn/$url\""
+          ;;
+        *) echo "ERR" ;;
+      esac
+    done
+  {{- end }}
+  # gh-proxy 域名固定解析表（squid.conf hosts_file 引用；修订⑤ pin DNS 根治 301 翻倍）
+  static-hosts: |
+    202.170.93.254 gh-proxy.test.osinfra.cn

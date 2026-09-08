@@ -1,0 +1,115 @@
+# download.pytorch.org/whl/ 连通性探测 Job（可重复执行版）
+#
+# 与 run-probe.sh 配套：本 Job 不 pin 具体节点（37 是 cache 节点且 karpenter 限制
+# kubernetes.io/hostname 标签），而是给容器注入 Squid 代理环境变量，流量经
+# squid-cache.squid.svc.cluster.local:3128 出去 —— 效果等同测 37 上的连通性
+# （Squid 副本本身就运行在 172.16.0.37）。
+# 注入方式与 traffic-test/tool（08-bazel.yaml 等）一致：标准 env（HTTP(S)_PROXY /
+# SSL_CERT_FILE / CURL_CA_BUNDLE）+ squid-ca 卷挂载到 /etc/squid-ca，便于 .gen-direct.py
+# 统一剥离；脚本内直连对照段用 --noproxy '*' 强制绕开注入的代理 env。
+#
+# 镜像选择：复用自建 squid 镜像（内置 /usr/bin/curl + openssl），集群内可拉、
+# 37 上已有缓存；不要用 docker.io/alpine/curl（37 经集群镜像代理 401 拉不动）。
+#
+# 使用：
+#   kubectl --kubeconfig ~/.kube/gy-001.yaml apply -f 01-download-pytorch-connectivity.yaml
+#   kubectl --kubeconfig ~/.kube/gy-001.yaml logs -n squid job/pytorch-connectivity-probe
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pytorch-connectivity-probe
+  namespace: squid
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      labels:
+        app: pytorch-connectivity-probe
+    spec:
+      tolerations:
+      - key: "cache"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+      restartPolicy: Never
+      volumes:
+      - name: squid-ca
+        secret:
+          secretName: squid-ca-cert
+          items:
+          - key: squid-ca.pem
+            path: squid-ca.pem
+          optional: true
+      containers:
+      - name: probe
+        image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/squid-cache/squid:v7.7.1
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: squid-ca
+          mountPath: /etc/squid-ca
+          readOnly: true
+        env:
+        - name: HTTP_PROXY
+          value: http://squid-cache.squid.svc.cluster.local:3128
+        - name: HTTPS_PROXY
+          value: http://squid-cache.squid.svc.cluster.local:3128
+        - name: http_proxy
+          value: http://squid-cache.squid.svc.cluster.local:3128
+        - name: https_proxy
+          value: http://squid-cache.squid.svc.cluster.local:3128
+        - name: NO_PROXY
+          value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+        - name: no_proxy
+          value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+        - name: SSL_CERT_FILE
+          value: /etc/squid-ca/squid-ca.pem
+        - name: CURL_CA_BUNDLE
+          value: /etc/squid-ca/squid-ca.pem
+        # 容器入口执行 run-probe.sh 内容（脚本短小，inline 复制；正式落库时改用
+        # ConfigMap 挂载，避免镜像内脚本漂移）
+        command: ["/bin/sh","-c"]
+        args:
+        - |
+          # 注入约定与 run-probe.sh 一致：标准环境变量 HTTPS_PROXY / SSL_CERT_FILE
+          P="$HTTPS_PROXY"
+          CA="$SSL_CERT_FILE"
+          BASE=https://download.pytorch.org/whl
+          probe() {
+            tag="$1"; url="$2"; shift 2
+            curl -sS --cacert "$CA" -x "$P" "$@" -o /dev/null \
+              -w "$tag: HTTP %{http_code} | %{content_type} | %{size_download}B | %{time_total}s\n" \
+              --max-time 60 "$url" || echo "$tag: FAILED"
+          }
+          hdr() {
+            tag="$1"; url="$2"
+            echo "--- $tag (headers) ---"
+            curl -sSI --cacert "$CA" -x "$P" --max-time 60 "$url" \
+              | grep -iE "^(HTTP|content-type|content-length|x-cache|x-squid-error|via|location)" | head -12
+            echo "---"
+          }
+          echo "node=$(hostname)  pod=$HOSTNAME  date=$(date -u +%FT%TZ)"
+          echo "proxy=$P  ca=$CA"; echo
+          echo "===== [经代理] GET /whl/ ====="
+          probe "root#1 " "$BASE/"
+          probe "root#2 " "$BASE/"; echo
+          echo "===== [经代理] GET /whl/cpu/torch/ 索引页 ====="
+          probe "index#1" "$BASE/cpu/torch/"
+          probe "index#2" "$BASE/cpu/torch/"; echo
+          echo "===== [经代理] 动态取 2.x wheel 做 HEAD（看 content-length / X-Cache） ====="
+          # 索引页 wheel 链接是绝对 URL 且跨 host：download-r2.pytorch.org（download.pytorch.org 上无对象路径 → 403）
+          WHEEL_URL=$(curl -sS --cacert "$CA" -x "$P" --max-time 60 "$BASE/cpu/torch/" 2>/dev/null \
+                  | grep -oE 'href="https://download-r2\.pytorch\.org/whl/cpu/torch-2\.[0-9]+\.[0-9]+[^"<]*linux_x86_64\.whl' \
+                  | sed 's/^href="//' | tail -1)
+          echo "wheel_url=$WHEEL_URL"
+          if [ -n "$WHEEL_URL" ]; then
+            hdr "wheel#1" "$WHEEL_URL"
+            hdr "wheel#2" "$WHEEL_URL"
+          fi
+          echo
+          echo "===== [直连对照] ====="
+          for u in "$BASE/" "$BASE/cpu/torch/"; do
+            curl -sS --noproxy '*' -o /dev/null -w "direct $u -> HTTP %{http_code} | %{content_type} | %{time_total}s\n" \
+                 --max-time 30 "$u" 2>/dev/null || echo "direct $u -> FAILED(直连不可达)"
+          done
+          echo "DONE"

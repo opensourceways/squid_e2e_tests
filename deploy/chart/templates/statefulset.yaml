@@ -78,6 +78,18 @@ spec:
         - name: squid-ca
           mountPath: /etc/squid/ssl_cert
           readOnly: true
+        {{- if .Values.squid.urlRewrite.enabled }}
+        # url_rewrite helper：境外静态下载 → 国内镜像（squid.urlRewrite.enabled 开启时挂载）
+        - name: squid-config
+          mountPath: /usr/local/bin/mirror-rewrite.sh
+          subPath: mirror-rewrite.sh
+          readOnly: true
+        {{- end }}
+        # gh-proxy 域名固定解析表（squid.conf hosts_file 引用；修订⑤ pin DNS 根治 301 翻倍）
+        - name: squid-config
+          mountPath: /etc/squid/static-hosts
+          subPath: static-hosts
+          readOnly: true
         - name: cache
           mountPath: /var/spool/squid
         command:
@@ -240,9 +252,17 @@ spec:
       - name: squid-config
         configMap:
           name: squid-config
+          # 0755：squid.conf 与 mirror-rewrite.sh 均带可执行位（helper 需可执行，squid.conf 无副作用）
+          defaultMode: 0755
           items:
           - key: squid.conf
             path: squid.conf
+          {{- if .Values.squid.urlRewrite.enabled }}
+          - key: mirror-rewrite.sh
+            path: mirror-rewrite.sh
+          {{- end }}
+          - key: static-hosts
+            path: static-hosts
       - name: squid-ca
         secret:
           secretName: squid-ca

@@ -1,0 +1,330 @@
+# GitHub 场景连通/重写/缓存测试（vcjob）——对应 SOURCE-REWRITE-ANALYSIS.md「类型三」
+# ⚡ gy-006 适配版：仅改 namespace(op-plugin→squid) 与镜像域(harbor-portal.osinfra.cn→harbor-portal.test.osinfra.cn)。
+#    架构不变（arm64 镜像 + nodeSelector arm64，gy-006 有 arm64 节点）。
+#
+# 被测 URL 三类（与 mirror-rewrite.sh 的 github 规则一一对应）：
+#   1. GHZIP = github.com/<repo>/archive/refs/tags/<tag>.zip
+#             官方 302 → codeload.github.com；helper 命中路径白名单 → 重写 gh-proxy（吸收 302）
+#   2. COZIP = codeload.github.com/<repo>/zip/refs/tags/<tag>
+#             无 302 直下；helper 命中 → 重写 gh-proxy
+#   3. git clone https://github.com/<repo>.git（Smart HTTP: GET /info/refs + POST /git-upload-pack）
+#             helper 路径白名单不匹配 → ERR → 原样直连官方；POST 协议级不可缓存（命中率恒 0%）
+#
+# 判定（跑完看 squid access.log，容器内 echo 提示了核对命令）：
+#   - url_rewrite 已开启：archive/codeload 请求目标 host 变为 gh-proxy.test.osinfra.cn
+#   - url_rewrite 未开启：目标 host 仍是 github.com/codeload.github.com，
+#     但 codeload 归档被 refresh_pattern `codeload.github.com/.*/refs/tags/` 长缓存（10080 100% 525600）
+#   - git clone：access.log 只有 CONNECT 隧道记录（NONE_NONE/200）或 TCP_TUNNEL，绝无 HIT
+#
+# 已知：github.com/archive 跳转端点会被 GitHub 限流（503/超时，GitHub 侧行为，非 squid 问题）。
+# 镜像实测：wget = GNU Wget 1.19.5（/usr/bin/wget）；系统 CA = /etc/pki/tls/certs/ca-bundle.crt（RHEL 系）。
+# CA 信任：wget 不认 SSL_CERT_FILE/CURL_CA_BUNDLE env → 改为 postStart 把 squid CA 注入系统
+# 信任库（同 traffic-test/tool/08-bazel.yaml 的 update-ca-trust 注入），wget 不再带 --ca-certificate。
+#
+# 用法（gy-006）：
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml apply -f 02-github-archive-git-gy006.yaml
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml get pods -n squid -l pipeline/run-id=github-arc-test
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml logs -n squid <pod>
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml exec -n squid <squid-pod> -c squid -- \
+#     grep -E "github|gh-proxy" /var/log/squid/access.log | tail -30
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: github-arc-
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: github-arc-test
+  name: github-archive-git-cache
+  namespace: squid
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  policies:
+  - action: AbortJob
+    event: PodFailed
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  # ─────────── task 1: 走 squid 代理拉 archive + codeload（×3 看缓存 MISS→HIT）───────────
+  - maxRetry: 1
+    minAvailable: 1
+    name: wget-squid
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - |
+            set -e
+            echo "MODE=$MODE"
+            for url in "$GHZIP" "$COZIP" "$OBSZIP"; do
+              echo "===== wget $url ×3（走 squid，期望 MISS→HIT→HIT）====="
+              for i in 1 2 3; do
+                t0=$(date +%s%N)
+                if err=$(wget -S -q -O /dev/null --timeout=30 "$url" 2>&1); then rc=0; else rc=$?; fi
+                t1=$(date +%s%N)
+                code=$(printf '%s\n' "$err" | grep -oE 'HTTP/[0-9.]+ +[0-9]{3}' | tail -1 | awk '{print $2}')
+                echo "pass $i: rc=$rc http=${code:-?} ms=$(( (t1-t0)/1000000 ))"
+              done
+            done
+            echo "===== 完成（$MODE）====="
+            echo "核对 access.log："
+            echo "  kubectl exec -n squid <pod> -c squid -- grep -E 'gh-proxy|codeload' /var/log/squid/access.log | tail"
+            echo "  出现 gh-proxy = url_rewrite 已生效；只有 codeload = 未开启重写，但应见 TCP_MISS/TCP_HIT"
+          command:
+          - sh
+          - -c
+          env:
+          - name: MODE
+            value: with-squid
+          - name: GHZIP
+            value: https://github.com/pybind/pybind11/archive/refs/tags/v2.10.3.zip
+          - name: COZIP
+            value: https://codeload.github.com/pybind/pybind11/zip/refs/tags/v2.10.3
+          - name: OBSZIP
+            value: https://github.com/huaweicloud/huaweicloud-sdk-c-obs/archive/refs/tags/v3.23.9.zip
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: SSL_CERT_FILE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: CURL_CA_BUNDLE
+            value: /etc/squid-ca/squid-ca.pem
+          image: harbor-portal.test.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+          name: wget
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                - /bin/sh
+                - -c
+                - |
+                  # 与 traffic-test/tool/08-bazel.yaml 一致：把 squid CA 注入系统信任库，
+                  # wget 不认 SSL_CERT_FILE/CURL_CA_BUNDLE env，注入后无需 --ca-certificate。
+                  set +e
+                  P=/etc/squid-ca/squid-ca.pem
+                  if [ -f "$P" ]; then
+                    if [ -d /etc/pki/ca-trust/source/anchors ]; then
+                      cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                      update-ca-trust extract >/dev/null 2>&1
+                    else
+                      cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                      update-ca-certificates -f >/dev/null 2>&1
+                    fi
+                  fi
+                  exit 0
+          resources:
+            limits:
+              cpu: '2'
+              memory: 4Gi
+            requests:
+              cpu: '1'
+              memory: 2Gi
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert
+  # ─────────── task 2: git clone 走 squid（Smart HTTP，helper 应 ERR 直连、0% 缓存）───────────
+  - maxRetry: 1
+    minAvailable: 1
+    name: git-squid
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - |
+            set -e
+            echo "MODE=$MODE  GIT_SSL_CAINFO=$GIT_SSL_CAINFO"
+            echo "===== git clone --depth=1 $GITREPO（走 squid）====="
+            t0=$(date +%s%N)
+            git clone --depth=1 "$GITREPO" /tmp/pybind11 2>&1 | tail -5
+            rc=${PIPESTATUS[0]}
+            t1=$(date +%s%N)
+            echo "git clone: rc=$rc ms=$(( (t1-t0)/1000000 ))"
+            echo "===== 完成（$MODE）====="
+            echo "核对 access.log：git 只有 CONNECT 隧道记录（NONE_NONE/200 或 TCP_TUNNEL），绝无 TCP_HIT"
+            echo "（POST /git-upload-pack 协议级不可缓存；helper 对 /info/refs、/git-upload-pack 返回 ERR 直连）"
+          command:
+          - /bin/bash
+          - -c
+          env:
+          - name: MODE
+            value: git-with-squid
+          - name: GITREPO
+            value: https://github.com/pybind/pybind11.git
+          - name: GIT_SSL_CAINFO
+            value: /etc/squid-ca/squid-ca.pem
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          image: harbor-portal.test.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+          name: git
+          resources:
+            limits:
+              cpu: '2'
+              memory: 4Gi
+            requests:
+              cpu: '1'
+              memory: 2Gi
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert
+  # ─────────── task 3: wget 手动换源 → gh-proxy（场景 3 的 C/D）───────────
+  # 与 git insteadOf 同构：URL 直接写成 https://gh-proxy.test.osinfra.cn/https://<原始URL>。
+  #   本 task 走 squid = D；直连版由 .gen-direct.py 生成 = C。
+  # 预期核对：gh-proxy 是内网域名，squid 默认 refresh_pattern 下 zip 可缓存但无 codeload 长缓存规则
+  # （换源作废官方域缓存键——S6 教训的实测对照）；gh-proxy 抓取境外抖动吸收在内网。
+  - maxRetry: 1
+    minAvailable: 1
+    name: wget-ghproxy-squid
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - |
+            set -e
+            echo "MODE=$MODE"
+            for url in "$GHZIP" "$COZIP" "$OBSZIP"; do
+              echo "===== wget $url ×3（gh-proxy 换源，走 squid）====="
+              for i in 1 2 3; do
+                t0=$(date +%s%N)
+                if err=$(wget -S -q -O /dev/null --timeout=30 "$url" 2>&1); then rc=0; else rc=$?; fi
+                t1=$(date +%s%N)
+                code=$(printf '%s\n' "$err" | grep -oE 'HTTP/[0-9.]+ +[0-9]{3}' | tail -1 | awk '{print $2}')
+                echo "pass $i: rc=$rc http=${code:-?} ms=$(( (t1-t0)/1000000 ))"
+              done
+            done
+            echo "===== 完成（$MODE）====="
+            echo "核对 access.log：gh-proxy 域 GET 是否 TCP_HIT（无 codeload 长缓存规则 → 默认缓存）"
+            echo "  kubectl exec -n squid <pod> -c squid -- grep 'gh-proxy' /var/log/squid/access.log | tail"
+          command:
+          - sh
+          - -c
+          env:
+          - name: MODE
+            value: ghproxy-with-squid
+          - name: GHZIP
+            value: https://gh-proxy.test.osinfra.cn/https://github.com/pybind/pybind11/archive/refs/tags/v2.10.3.zip
+          - name: COZIP
+            value: https://gh-proxy.test.osinfra.cn/https://codeload.github.com/pybind/pybind11/zip/refs/tags/v2.10.3
+          - name: OBSZIP
+            value: https://gh-proxy.test.osinfra.cn/https://github.com/huaweicloud/huaweicloud-sdk-c-obs/archive/refs/tags/v3.23.9.zip
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: SSL_CERT_FILE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: CURL_CA_BUNDLE
+            value: /etc/squid-ca/squid-ca.pem
+          image: harbor-portal.test.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+          name: wget
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                - /bin/sh
+                - -c
+                - |
+                  # 与 traffic-test/tool/08-bazel.yaml 一致：把 squid CA 注入系统信任库，
+                  # wget 不认 SSL_CERT_FILE/CURL_CA_BUNDLE env，注入后无需 --ca-certificate。
+                  set +e
+                  P=/etc/squid-ca/squid-ca.pem
+                  if [ -f "$P" ]; then
+                    if [ -d /etc/pki/ca-trust/source/anchors ]; then
+                      cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                      update-ca-trust extract >/dev/null 2>&1
+                    else
+                      cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                      update-ca-certificates -f >/dev/null 2>&1
+                    fi
+                  fi
+                  exit 0
+          resources:
+            limits:
+              cpu: '2'
+              memory: 4Gi
+            requests:
+              cpu: '1'
+              memory: 2Gi
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert

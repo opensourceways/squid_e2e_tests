@@ -49,6 +49,11 @@ squid:
     limits:
       cpu: 2
       memory: 4Gi
+  # 境外静态下载 → 国内镜像的 url_rewrite 重定向（T2）。默认关闭，需要换源的集群（如 gy-006）开启。
+  # 开启后：configmap 生成 mirror-rewrite.sh helper 并追加 url_rewrite 段，statefulset 挂载 helper。
+  # 注意：目标域与新镜像域都被 ssl_bump bump all 覆盖，勿把镜像域加进 registry splice 名单。
+  urlRewrite:
+    enabled: false
 
 exporter:
   enabled: true

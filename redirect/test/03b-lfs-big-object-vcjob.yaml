@@ -1,0 +1,113 @@
+# LFS 大对象定论（vcjob）——验证 git-lfs 的 HTTP 流量是否走 squid
+#
+# 背景：03/04E 的 lfs pull 最小对象（129B）未在 squid access.log 留下任何记录。
+# 两种可能：①小对象被 git-lfs 本地优化；②git-lfs 的 go HTTP 客户端不认代理，流量绕开 squid。
+#
+# 方法：拉 ~95MB 的 adv_inception_v3 对象。
+#   - 若 access.log 出现 github-cloud.githubusercontent.com 记录 → git-lfs 走 squid（①成立）
+#   - 若仍零记录 → git-lfs 当前配置下未走代理（②成立：LFS 流量不在 squid 管控内）
+#
+# 另测 GIT_TRACE 输出，看 git-lfs 内部请求的 URL 与代理使用情况。
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: git-lfs-big-
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: git-lfs-big
+  name: git-lfs-big
+  namespace: op-plugin
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  - maxRetry: 1
+    minAvailable: 1
+    name: big-squid
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - |
+            set -e
+            echo "MODE=big-lfs-with-squid"
+            git config --global http.sslCAInfo "$GIT_SSL_CAINFO"
+            git config --global http.proxy "$HTTPS_PROXY"
+            git config --global https.proxy "$HTTPS_PROXY"
+            # git-lfs 内部请求调试：GIT_TRACE 覆盖 git；git-lfs 自身用 GIT_TRANSFER_TRACE/GIT_TRACE
+            export GIT_TRACE=1
+            export GIT_TRANSFER_TRACE=1
+            export GIT_CURL_VERBOSE=0
+            echo "===== clone（SKIP_SMUDGE）====="
+            GIT_LFS_SKIP_SMUDGE=1 git clone --depth=1 https://github.com/onnx/models.git /tmp/onnx-models >/tmp/clone.log 2>&1 || { echo "CLONE FAIL"; tail -8 /tmp/clone.log; exit 0; }
+            cd /tmp/onnx-models
+            BIG=$(git lfs ls-files | grep -i adv_inception_v3 | awk '{print $NF}' | head -1)
+            echo "BIG=$BIG"
+            if [ -z "$BIG" ]; then
+              echo "!! 未找到 adv_inception_v3"; exit 0
+            fi
+            echo "===== lfs pull 大对象（~95MB）====="
+            t0=$(date +%s%N)
+            git lfs pull --include="$BIG" >/tmp/big.log 2>&1
+            rc=$?
+            t1=$(date +%s%N)
+            echo "lfs pull big: rc=$rc ms=$(( (t1-t0)/1000000 ))"
+            ls -la "$BIG" | head -2
+            echo "===== GIT_TRANSFER_TRACE（git-lfs 请求片段）====="
+            grep -iE "info/lfs|objects/batch|github-cloud|github.com|proxy|HTTP" /tmp/big.log | head -25 || true
+            echo "===== 完成：核对 access.log 是否出现 github-cloud/info/lfs ====="
+            echo "  kubectl exec -n squid <pod> -c squid -- grep -E 'github-cloud|info/lfs' /var/log/squid/access.log | tail"
+          command:
+          - sh
+          - -c
+          env:
+          - name: GIT_SSL_CAINFO
+            value: /etc/squid-ca/squid-ca.pem
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: SSL_CERT_FILE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: CURL_CA_BUNDLE
+            value: /etc/squid-ca/squid-ca.pem
+          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+          name: git
+          resources:
+            limits:
+              cpu: '2'
+              memory: 4Gi
+            requests:
+              cpu: '1'
+              memory: 2Gi
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert

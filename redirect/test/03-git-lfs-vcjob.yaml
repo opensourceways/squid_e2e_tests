@@ -1,0 +1,213 @@
+# Git clone with LFS 场景测试（vcjob）——对应 SOURCE-REWRITE-ANALYSIS.md「类型三：git Smart HTTP」
+#
+# 为什么测这个：真实 CI 里模型/数据集仓库（ascend-docker-image、DrivingSDK GR00T、
+# mind-cluster docs 等）用 git-lfs 存大文件。git clone 已经是"动态协议不可缓存"，
+# git-lfs 又在 clone 之外叠加了两类新流量，必须实测确认 Squid 对它们的处理。
+#
+# git clone with LFS 的完整流量链（与 mirror-rewrite.sh 的行为一一对应）：
+#   1. git clone（Smart HTTP）
+#      GET  https://github.com/<repo>.git/info/refs?service=git-upload-pack
+#      POST https://github.com/<repo>.git/git-upload-pack
+#      → helper 路径白名单不匹配 → ERR → 原样直连官方；POST 协议级不可缓存（命中率恒 0%）
+#   2. git-lfs batch API（发现 LFS 对象在哪）
+#      POST https://github.com/<repo>.git/info/lfs/objects/batch
+#      → 同上：helper ERR → 直连；POST 不可缓存
+#   3. git-lfs 对象下载（真正的"大文件"）
+#      GET https://github-cloud.githubusercontent.com/alambic/media/<oid>?token=<签名>...
+#      → 该域后缀是 .githubusercontent.com，不在 ACL `rewritable dstdomain .github.com`
+#        里 → url_rewrite 根本不碰它 → 直连官方 CDN
+#      → 且 URL 带一次性签名 token，每次 batch 返回的 URL 都不同 →
+#        即使想缓存，缓存键也必然分裂 → LFS 对象天然不可缓存（这跟 wget/archive 相反）
+#
+# 判定（跑完看 squid access.log，容器内 echo 提示了核对命令）：
+#   - clone / batch：只有 CONNECT github.com 隧道记录（TCP_TUNNEL / NONE_NONE/200），绝无 TCP_HIT
+#   - 对象下载：出现 github-cloud.githubusercontent.com 的 GET（bump 后可见全 URL），
+#     且同一次测试内该对象 URL 只出现一次（签名 URL 不重复）
+#   - 对照：直连任务（git-lfs-direct）无 squid 参与，可对比链路稳定性
+#
+# 测试仓库：onnx/models（实测确认 .gitattributes 含 `*.onnx filter=lfs ...`，确有 LFS 对象）
+#   控制下载量：--depth=1 + GIT_LFS_SKIP_SMUDGE=1（clone 只拿指针不拉对象），
+#   再对"最小"的 1 个 LFS 对象做单文件 git lfs pull —— 既能触发 batch API + 签名 URL 流量，
+#   又不会把整个仓库（数百个模型，GB 级）拉下来。
+#   git lfs ls-files -j 输出稳定 JSON；实测 schema（git-lfs 3.7.1）：
+#     {"files":[{"name":"<路径>","size":<字节>,"oid":...}]}   ← 路径字段叫 name，不是 path！
+#   用 python3 解析取 size 最小的对象。
+#
+# 镜像 git-lfs：pytorch_2.11.0_a2_aarch64_builder:20260518 实测已预装 3.7.1，下面的
+#   gh-proxy 下载兜底通常不会触发（仅当换用无 git-lfs 的镜像时才需要）。
+#   注意：下载兜底本身也是一条 github release 下载链路，若命中 02 号测试的结论正好互相印证。
+#
+# 用法：
+#   kubectl --kubeconfig ~/.kube/gy-001.yaml apply -f 03-git-lfs-vcjob.yaml
+#   kubectl --kubeconfig ~/.kube/gy-001.yaml get pods -n op-plugin -l pipeline/run-id=git-lfs-test
+#   kubectl --kubeconfig ~/.kube/gy-001.yaml logs -n op-plugin <pod>
+#   kubectl --kubeconfig ~/.kube/gy-001.yaml exec -n squid <squid-pod> -c squid -- \
+#     grep -E "github-cloud|info/lfs|git-upload-pack" /var/log/squid/access.log | tail -30
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: git-lfs-
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: git-lfs-test
+  name: git-lfs-cache
+  namespace: op-plugin
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  # 不用 AbortJob：两个 task 各自独立，直连任务可能因境外抖动失败，
+  # 但走 squid 的 task 结果要保留（日志里核对即可）。
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  # ─────────── task 1: git clone with LFS 走 squid ───────────
+  - maxRetry: 1
+    minAvailable: 1
+    name: git-lfs-squid
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - |
+            set -e
+            echo "MODE=$MODE  LFSREPO=$LFSREPO"
+            # ── 工具准备：镜像无 git-lfs 则经 gh-proxy 拉 arm64 二进制 ──
+            if ! command -v git-lfs >/dev/null 2>&1; then
+              echo "git-lfs 未预装 → 经 gh-proxy 下载 v3.6.1"
+              curl -fsSL --max-time 120 -o /tmp/git-lfs.tar.gz \
+                https://gh-proxy.test.osinfra.cn/https://github.com/git-lfs/git-lfs/releases/download/v3.6.1/git-lfs-linux-arm64-v3.6.1.tar.gz
+              tar -C /usr/local -xzf /tmp/git-lfs.tar.gz
+            fi
+            git lfs version
+            git lfs install --skip-repo 2>&1 | tail -1
+            # git-lfs 自己的 HTTP 客户端也要认 squid CA + 走代理（git config 兜底 env）
+            if [ -n "$GIT_SSL_CAINFO" ]; then
+              git config --global http.sslCAInfo "$GIT_SSL_CAINFO"
+            fi
+            if [ -n "$HTTPS_PROXY" ]; then
+              git config --global http.proxy "$HTTPS_PROXY"
+              git config --global https.proxy "$HTTPS_PROXY"
+            fi
+
+            echo "===== git clone --depth=1 $LFSREPO（走 squid，Smart HTTP）====="
+            t0=$(date +%s%N)
+            GIT_LFS_SKIP_SMUDGE=1 git clone --depth=1 "$LFSREPO" /tmp/onnx-models 2>&1 | tail -4
+            rc=${PIPESTATUS[0]}
+            t1=$(date +%s%N)
+            echo "clone: rc=$rc ms=$(( (t1-t0)/1000000 ))"
+
+            cd /tmp/onnx-models
+            echo "===== LFS 对象清单（前 10 条）====="
+            git lfs ls-files | head -10
+            echo "===== LFS 对象统计 ====="
+            git lfs ls-files -j | python3 -c '
+            import sys, json
+            d = json.load(sys.stdin)
+            fs = d["files"] if isinstance(d, dict) else d
+            out = [(f.get("size", 0), f["name"]) for f in fs if f.get("name")]
+            print("count=%d total_bytes=%d" % (len(out), sum(s for s, _ in out)))
+            '
+            # 取"最小"的 1 个对象做单文件拉取（控制下载量，仍触发 batch API + 签名 URL）
+            F=$(git lfs ls-files -j | python3 -c '
+            import sys, json
+            d = json.load(sys.stdin)
+            fs = d["files"] if isinstance(d, dict) else d
+            out = [(f.get("size", 0), f["name"]) for f in fs if f.get("name")]
+            out.sort()
+            print(out[0][1] if out else "")
+            ')
+            if [ -z "$F" ]; then
+              echo "!! 未解析到 LFS 对象（JSON 解析失败或仓库无 LFS 数据）"
+              exit 1
+            fi
+            echo "===== 单文件 LFS 拉取: $F ====="
+            t0=$(date +%s%N)
+            git lfs pull --include="$F" 2>&1 | tail -4
+            rc=${PIPESTATUS[0]}
+            t1=$(date +%s%N)
+            echo "lfs pull: rc=$rc ms=$(( (t1-t0)/1000000 ))"
+            ls -la "$F"
+
+            # 大对象定论：129B 小对象未在 access.log 留下记录（两种可能：小对象优化 / git-lfs 绕代理）。
+            # 拉一个 ~95MB 的大对象（adv_inception_v3）：若 access.log 出现 github-cloud 记录 → 小对象优化说成立；
+            # 若仍零记录 → git-lfs 的 go HTTP 客户端当前配置下未走 squid（LFS 流量绕开 squid 管控）。
+            BIG=$(git lfs ls-files | grep -i adv_inception_v3 | awk '{print $NF}' | head -1)
+            if [ -n "$BIG" ]; then
+              echo "===== 大对象 LFS 拉取（~95MB）: $BIG ====="
+              t0=$(date +%s%N)
+              git lfs pull --include="$BIG" 2>&1 | tail -3
+              rc=${PIPESTATUS[0]}
+              t1=$(date +%s%N)
+              echo "lfs pull big: rc=$rc ms=$(( (t1-t0)/1000000 ))"
+              ls -la "$BIG" | head -2
+            else
+              echo "!! 未找到 adv_inception_v3（大对象定论跳过）"
+            fi
+
+            echo "===== 完成（$MODE）====="
+            echo "核对 access.log（三类流量）："
+            echo "  1) clone     : CONNECT github.com 隧道（TCP_TUNNEL/NONE_NONE），无 HIT"
+            echo "  2) lfs batch : POST github.com/onnx/models.git/info/lfs/objects/batch（helper ERR→直连，不可缓存）"
+            echo "  3) lfs 对象   : GET github-cloud.githubusercontent.com（签名 URL，不在 ACL .github.com → 不重写；每次 URL 不同 → 永远 MISS）"
+            echo "  命令: kubectl exec -n squid <pod> -c squid -- grep -E 'github-cloud|info/lfs' /var/log/squid/access.log | tail"
+          command:
+          - sh
+          - -c
+          env:
+          - name: MODE
+            value: git-lfs-with-squid
+          - name: LFSREPO
+            value: https://github.com/onnx/models.git
+          - name: GIT_SSL_CAINFO
+            value: /etc/squid-ca/squid-ca.pem
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: SSL_CERT_FILE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: CURL_CA_BUNDLE
+            value: /etc/squid-ca/squid-ca.pem
+          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+          name: git
+          resources:
+            limits:
+              cpu: '2'
+              memory: 4Gi
+            requests:
+              cpu: '1'
+              memory: 2Gi
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert
+  # ─────────── task 2: git clone with LFS 直连（对照）───────────
+  # 注意：direct 版由 .gen-direct.py 自动生成（见文件头注释），这里不再手写维护。
+  # 生成: python3 .gen-direct.py 03-git-lfs-vcjob.yaml /tmp/03-git-lfs-direct.yaml
+  # 结论: 直连 github 境外不稳定（Empty reply / 超时），已记录于 SOURCE-REWRITE-ANALYSIS.md
+

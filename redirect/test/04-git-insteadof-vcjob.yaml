@@ -1,0 +1,269 @@
+# git 场景完整换源矩阵测试（vcjob）——insteadOf 客户端层换源
+#
+# 背景（详见 SOURCE-REWRITE-ANALYSIS.md「类型三」+ 02/03 号测试实测）：
+#   Squid 的 url_rewrite 对 git Smart HTTP 无能为力：
+#     - helper 路径白名单不匹配 /info/refs、/git-upload-pack → 返回 ERR → 直连官方
+#     - POST /git-upload-pack 协议级不可缓存 → git clone 命中率恒 0%
+#   而 gh-proxy（gh-proxy.test.osinfra.cn）是"服务端抓取"：能吸收 302 并转发整个
+#   git 协议（旧 testcase 14-gitlfs 里 `git clone https://gh-proxy.test.osinfra.cn/...` 已验证可行）。
+#
+# 本测试验证"客户端 insteadOf 换源"：
+#   git config --global url."https://gh-proxy.test.osinfra.cn/https://github.com/".insteadOf "https://github.com/"
+#   → git 发起的所有 https://github.com/... 请求在客户端被改写成 gh-proxy URL。
+#   这是纯客户端层换源（git 自带机制，CI 配方注入一行即可），与 squid url_rewrite 无关。
+#
+# ── 完整矩阵（按流量类型 × 换源 × 代理）────────────────────────────────
+# ① wget/静态文件（github archive / codeload）：
+#    - 不需要 insteadOf（那是 git 专属机制）；wget 换源 = 直接把 URL 拼 gh-proxy 前缀
+#    - 02 已测：直连 GHZIP 63s/65s 抖动、COZIP ~1.4s；走 squid COZIP TCP_HIT 0.33s（缓存有效）
+#    - 结论：静态文件靠 squid 缓存即可，无需换源（gh-proxy 仅作"官方不可达"兜底）
+# ② git clone（Smart HTTP）：
+#    | case | 客户端换源 | 代理 | 状态 |
+#    |------|-----------|------|------|
+#    | A | 无（官方 URL）| 直连 | 02 已测：FAIL（github.com:443 超时 ~160s，境外不通）|
+#    | B | 无（官方 URL）| squid | 02 已测：OK 1.9s（helper ERR→直连；POST 不可缓存 0% 命中）|
+#    | C | insteadOf→gh-proxy | 直连 | 由 .gen-direct.py 生成（insteadof-squid → -direct），系统 CA |
+#    | D | insteadOf→gh-proxy | squid | 本文件 task1（全流量经 squid bump；GET /info/refs 是否缓存）|
+# ③ git LFS（batch API + 对象下载）：
+#    - batch API endpoint 从 remote URL 派生 → insteadOf 改写 remote URL 后，batch POST
+#      是否跟着走 gh-proxy？（gh-proxy 是否转发 /info/lfs/objects/batch）—— 待实测
+#    - LFS 对象下载 URL 是 batch 响应的绝对 href（github-cloud.githubusercontent.com?token=签名）
+#      → 不受 insteadOf 影响 → 直连境外 CDN → 恒 MISS、不可缓存（03 已验）
+#    - 本文件 task2：insteadOf + squid 下 LFS 分叉行为实测
+#
+# 判定（D/task2 跑完看 squid access.log）：
+#   - 出现 gh-proxy.test.osinfra.cn 的 CONNECT 隧道 + bump 后 GET/POST（gh-proxy 域名不在
+#     ACL rewritable 里 → url_rewrite 不碰它；只是经 squid 出网）
+#   - task1 第二次 clone 的 /info/refs GET：若 gh-proxy 返回可缓存头 → TCP_MISS→TCP_HIT；
+#     POST /git-upload-pack 恒 TCP_MISS
+#   - task2：access.log 里 batch POST 的 host 是 gh-proxy 还是 github.com；
+#     对象下载 host 是否为 github-cloud.githubusercontent.com（直连境外）
+#
+# 用法：
+#   kubectl --kubeconfig ~/.kube/gy-001.yaml apply -f 04-git-insteadof-vcjob.yaml
+#   kubectl --kubeconfig ~/.kube/gy-001.yaml logs -n op-plugin <pod>
+#   kubectl --kubeconfig ~/.kube/gy-001.yaml exec -n squid <squid-pod> -c squid -- \
+#     grep -E "gh-proxy" /var/log/squid/access.log | tail -30
+#
+# 直连版（case C 对照）不再手写，由 .gen-direct.py 生成后单独提交：
+#   python3 .gen-direct.py 04-git-insteadof-vcjob.yaml /tmp/04-git-insteadof-direct.yaml
+#   kubectl --kubeconfig ~/.kube/gy-001.yaml apply -f /tmp/04-git-insteadof-direct.yaml
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: git-insteadof-
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: git-insteadof-test
+  name: git-insteadof-cache
+  namespace: op-plugin
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  # ─────────── task 1: D. insteadOf → gh-proxy，经 squid 代理 ───────────
+  - maxRetry: 1
+    minAvailable: 1
+    name: insteadof-squid
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - |
+            set -e
+            echo "MODE=$MODE"
+            git config --global url."https://gh-proxy.test.osinfra.cn/https://github.com/".insteadOf "https://github.com/" \
+              || { echo "WARNING: git config failed for github"; exit 1; }
+            git config --global -l | grep -i insteadof || true
+            # git 走 squid：config 兜底 env（镜像 git 认 GIT_SSL_CAINFO / http.proxy）
+            git config --global http.sslCAInfo "$GIT_SSL_CAINFO"
+            git config --global http.proxy "$HTTPS_PROXY"
+            git config --global https.proxy "$HTTPS_PROXY"
+            for i in 1 2; do
+              echo "===== git clone --depth=1 $GITREPO ×$i（insteadOf→gh-proxy，经 squid）====="
+              rm -rf /tmp/repo
+              t0=$(date +%s%N)
+              git clone --depth=1 "$GITREPO" /tmp/repo 2>&1 | tail -3
+              rc=${PIPESTATUS[0]}
+              t1=$(date +%s%N)
+              echo "clone pass$i: rc=$rc ms=$(( (t1-t0)/1000000 ))"
+            done
+            echo "===== 完成（$MODE）====="
+            echo "核对 access.log：gh-proxy.test.osinfra.cn 的 CONNECT + bump 后 GET/POST"
+            echo "  第二次 clone 的 /info/refs GET 是否 TCP_HIT（POST /git-upload-pack 恒 MISS）"
+            echo "  命令: kubectl exec -n squid <pod> -c squid -- grep 'gh-proxy' /var/log/squid/access.log | tail -30"
+          command:
+          - sh
+          - -c
+          env:
+          - name: MODE
+            value: insteadof-squid
+          - name: GITREPO
+            value: https://github.com/pybind/pybind11.git
+          - name: GIT_SSL_CAINFO
+            value: /etc/squid-ca/squid-ca.pem
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: SSL_CERT_FILE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: CURL_CA_BUNDLE
+            value: /etc/squid-ca/squid-ca.pem
+          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+          name: git
+          resources:
+            limits:
+              cpu: '2'
+              memory: 4Gi
+            requests:
+              cpu: '1'
+              memory: 2Gi
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert
+  # ─────────── task 2: E. git LFS + insteadOf，经 squid ───────────
+  # 验证 LFS 分叉行为：batch API 是否跟着 insteadOf 走 gh-proxy；对象下载是否仍直连境外
+  - maxRetry: 1
+    minAvailable: 1
+    name: lfs-insteadof-squid
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - |
+            set -e
+            echo "MODE=$MODE  LFSREPO=$LFSREPO"
+            git config --global url."https://gh-proxy.test.osinfra.cn/https://github.com/".insteadOf "https://github.com/" \
+              || { echo "WARNING: git config failed for github"; exit 1; }
+            git config --global -l | grep -i insteadof || true
+            git config --global http.sslCAInfo "$GIT_SSL_CAINFO"
+            git config --global http.proxy "$HTTPS_PROXY"
+            git config --global https.proxy "$HTTPS_PROXY"
+            # 镜像预装 git-lfs（3.7.1）；无则经 gh-proxy 下载
+            if ! command -v git-lfs >/dev/null 2>&1; then
+              curl -fsSL --max-time 120 -o /tmp/git-lfs.tar.gz \
+                https://gh-proxy.test.osinfra.cn/https://github.com/git-lfs/git-lfs/releases/download/v3.6.1/git-lfs-linux-arm64-v3.6.1.tar.gz
+              tar -C /usr/local -xzf /tmp/git-lfs.tar.gz
+            fi
+            git lfs version
+            git lfs install --skip-repo 2>&1 | tail -1
+
+            echo "===== git clone --depth=1 $LFSREPO（insteadOf→gh-proxy + squid）====="
+            t0=$(date +%s%N)
+            GIT_LFS_SKIP_SMUDGE=1 git clone --depth=1 "$LFSREPO" /tmp/onnx-models 2>&1 | tail -3
+            rc=${PIPESTATUS[0]}
+            t1=$(date +%s%N)
+            echo "clone: rc=$rc ms=$(( (t1-t0)/1000000 ))"
+            cd /tmp/onnx-models
+            echo "===== remote URL 与 LFS endpoint ====="
+            git remote -v
+            git config --get remote.origin.url
+            # 取最小 LFS 对象（schema 已确认：{"files":[{"name","size",...}]}）
+            F=$(git lfs ls-files -j | python3 -c '
+            import sys, json
+            d = json.load(sys.stdin)
+            fs = d["files"] if isinstance(d, dict) else d
+            out = [(int(f.get("size", 0) or 0), f["name"]) for f in fs if isinstance(f, dict) and f.get("name")]
+            out.sort()
+            print(out[0][1] if out else "")
+            ')
+            if [ -z "$F" ]; then
+              echo "!! 未解析到 LFS 对象"; exit 1
+            fi
+            echo "===== 单文件 LFS 拉取: $F ====="
+            t0=$(date +%s%N)
+            git lfs pull --include="$F" 2>&1 | tail -4
+            rc=${PIPESTATUS[0]}
+            t1=$(date +%s%N)
+            echo "lfs pull: rc=$rc ms=$(( (t1-t0)/1000000 ))"
+            ls -la "$F" 2>&1 | head -2
+            echo "===== 完成（$MODE）====="
+            echo "核对 access.log："
+            echo "  1) batch POST 的 host：gh-proxy.test.osinfra.cn（insteadOf 生效）还是 github.com（未生效）？"
+            echo "  2) 对象下载 host：github-cloud.githubusercontent.com?token=（直连境外，不在 ACL → 不重写）"
+            echo "  命令: kubectl exec -n squid <pod> -c squid -- grep -E 'gh-proxy|info/lfs|github-cloud' /var/log/squid/access.log | tail -30"
+          command:
+          - sh
+          - -c
+          env:
+          - name: MODE
+            value: lfs-insteadof-squid
+          - name: LFSREPO
+            value: https://github.com/onnx/models.git
+          - name: GIT_SSL_CAINFO
+            value: /etc/squid-ca/squid-ca.pem
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: SSL_CERT_FILE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: CURL_CA_BUNDLE
+            value: /etc/squid-ca/squid-ca.pem
+          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+          name: git
+          resources:
+            limits:
+              cpu: '2'
+              memory: 4Gi
+            requests:
+              cpu: '1'
+              memory: 2Gi
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: arm64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert
