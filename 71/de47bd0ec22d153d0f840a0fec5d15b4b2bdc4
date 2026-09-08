@@ -1,0 +1,197 @@
+redirect/test/.gen-direct.py
+  s_01bdef1efbc8c1::t_fa83bc990a7428 12-15
+  s_01bdef1efbc8c1::t_3ad36e2e589054 75,79-88
+  s_01bdef1efbc8c1::t_b4c0a8848d8eb7 1-11,16-74,76-78,89-94
+deploy/chart/values.yaml
+  s_01bdef1efbc8c1::t_8fdd9a4e373baa 52-56
+deploy/chart/templates/statefulset.yaml
+  s_01bdef1efbc8c1::t_b827f26785124c 255-256,260-263
+  s_01bdef1efbc8c1::t_46bd774c26a011 81-87
+  s_01bdef1efbc8c1::t_b421ce478588da 88-92
+  s_01bdef1efbc8c1::t_9688def793aa20 264-265
+deploy/chart/Chart.yaml
+  s_01bdef1efbc8c1::t_c3f2c95a903e05 5
+deploy/chart/templates/configmap.yaml
+  s_01bdef1efbc8c1::t_a81fd7c1b74768 153-155
+  s_01bdef1efbc8c1::t_208a83fe6bee7d 150
+  s_01bdef1efbc8c1::t_79296fe6cb5dfb 126-140,145,148-149,156-157,160-182,191-196
+  s_01bdef1efbc8c1::t_09dc328be31422 151-152
+  s_01bdef1efbc8c1::t_a67006b2b1f0a4 183-190
+  s_01bdef1efbc8c1::t_d0288dda1f93ec 158-159
+  s_01bdef1efbc8c1::t_6a529a6c8f9864 40
+  s_01bdef1efbc8c1::t_30bf1db8538133 34-39,42-47
+  s_01bdef1efbc8c1::t_ca0990f76ae5b3 197-199
+  s_01bdef1efbc8c1::t_b56ae580f9f631 41
+  s_01bdef1efbc8c1::t_0111698687597a 105-111
+  s_01bdef1efbc8c1::t_d561ce8ff7f066 146-147
+  s_01bdef1efbc8c1::t_413990316f21d5 141-144
+redirect/MIRROR-CACHE-TOPIC.md
+  s_01bdef1efbc8c1::t_ad627cddd84476 411
+  s_01bdef1efbc8c1::t_5e856a88d9da36 248,250-253
+  s_01bdef1efbc8c1::t_6eb95f9311abd7 448-449,452-453,457-458
+  s_01bdef1efbc8c1::t_a3166e487075e0 377,380-387,390-392,394,407-410,412-413,421
+  s_01bdef1efbc8c1::t_96b02b3b824d85 439
+  s_01bdef1efbc8c1::t_c0fb5cb3cda0c4 422
+  s_01bdef1efbc8c1::t_01a36ee17420a7 340-344,347-349,354-358,361-366,373-376,378-379,388-389,393,395-406,414-420,423-438,440-447,450-451,454-456,461-462
+  s_01bdef1efbc8c1::t_4abdba9a5f275a 1-247,249,254-339
+  s_01bdef1efbc8c1::t_13bab8d95c3af5 460
+  s_01bdef1efbc8c1::t_13ba7e1201b8ab 459
+  s_01bdef1efbc8c1::t_3b44e9657a323d 359-360
+  s_01bdef1efbc8c1::t_a394f0675ff321 368
+  s_01bdef1efbc8c1::t_63dd3524d0c3a2 367,369-372
+  s_01bdef1efbc8c1::t_e145c4fe98decd 350-353
+  s_01bdef1efbc8c1::t_70636342777e4d 345-346
+redirect/test/02-github-archive-git-gy006.yaml
+  s_01bdef1efbc8c1::t_2f7719388d7cc3 1-330
+redirect/gh-proxy/SOLUTION.md
+  s_01bdef1efbc8c1::t_0b983777f6ccca 18,24,27-28,52-54,56-57,59-66,69-71,73,79-91,94-118,120,125,127-128,131-135,138,140-144,148,154-156,159-167,174-177,204,206-207,210,212,214-216,218,220-221
+  s_01bdef1efbc8c1::t_b5c1749d7aa9c2 45,47-51
+  s_01bdef1efbc8c1::t_f0aafe9b7e18a1 75-78
+  s_01bdef1efbc8c1::t_42db5d5cbbf671 170-172
+  s_01bdef1efbc8c1::t_6e8f1dd7be30cb 26
+  s_01bdef1efbc8c1::t_38614cffe7142e 199,201-202
+  s_01bdef1efbc8c1::t_5cadbfb5a272ba 1-5,19-23,25,29-35,39,41-44,46,55,58,67-68,72,74,92-93,119,121-124,126,129-130,136-137,139,145-147,149,157-158,168-169,173,178-198,200,203,205,208-209,211,213,217,219,224-242,248-251
+  s_01bdef1efbc8c1::t_b34f8f51dd2c66 6-17
+  s_01bdef1efbc8c1::t_50cc1dcabdae31 36-38,40
+  s_01bdef1efbc8c1::t_16980627c215c5 150-153
+  s_01bdef1efbc8c1::t_fdc5b6bcc29b68 222-223
+  s_01bdef1efbc8c1::t_6bd9a19900ca2f 243-247,252-255
+deploy/values-006.yaml
+  s_01bdef1efbc8c1::t_c7e0a92bb91499 24-27
+redirect/test/03b-lfs-big-object-vcjob.yaml
+  s_01bdef1efbc8c1::t_b11d2078baba86 1-113
+redirect/test/02-github-archive-git-vcjob.yaml
+  s_01bdef1efbc8c1::t_0bc6ca0193e5de 226-332
+  s_01bdef1efbc8c1::t_6a311c4a0709ac 87-88
+  s_01bdef1efbc8c1::t_ad0a254b458110 28-31
+  s_01bdef1efbc8c1::t_57cd21a9005020 107-127
+  s_01bdef1efbc8c1::t_d469f9c5d64217 1-18,21-27,32-62,64-66,68-86,89-106,128-153,155-176,178-225
+  s_01bdef1efbc8c1::t_05eb22bbc1bc87 177
+  s_01bdef1efbc8c1::t_391b05ed2c21e7 19-20
+  s_01bdef1efbc8c1::t_28328ec5a3319c 154
+  s_01bdef1efbc8c1::t_6ef167a526ebf8 63
+  s_01bdef1efbc8c1::t_2054727377478e 67
+redirect/test/04-git-insteadof-vcjob.yaml
+  s_01bdef1efbc8c1::t_2a2897567a450d 153
+  s_01bdef1efbc8c1::t_a2a2a76471623d 25-26,32,34,37,39,47-50
+  s_01bdef1efbc8c1::t_e9be3ee3fc4210 66
+  s_01bdef1efbc8c1::t_2735c7ae826bb3 154-269
+  s_01bdef1efbc8c1::t_29109ff7c235df 1,3,15-24,27-31,33,35-36,38,40
+  s_01bdef1efbc8c1::t_7d1334f5bc106c 2,4-14,41-46,51-65,67-152
+redirect/gh-proxy/TEST-WORKFLOW.md
+  s_01bdef1efbc8c1::t_7823edaa46a447 14-17
+  s_01bdef1efbc8c1::t_b3f2b47fd9204a 6-13,25-31,35,37,39-40,42-43,45-48,53-55,59,66,68-72,74,78,80-81,83,93-110,116-120,127-129,134-135,138-139,150-151,156,161,163,167,169-170,172,175,184-186,192-199,204-205,209,213-216,218,220-221,224-232,234-236,242,244-245,260-261,271,279-311,318-321
+  s_01bdef1efbc8c1::t_f11e29ede3bc86 337-343
+  s_01bdef1efbc8c1::t_14905628571175 1-5,18-24,32-34,36,38,41,44,49-52,56-58,60-65,67,73,75-77,79,82,84-92,111-115,121-126,130-133,136-137,140-149,152-155,157-160,162,164-166,168,171,173-174,176-183,187-191,200-203,206-208,210-212,217,219,222-223,233,237-241,243,246-259,262-270,272-278,312-317,322-336
+redirect/test/run-probe.sh
+  s_01bdef1efbc8c1::t_f886a03b19a121 18-19
+  s_01bdef1efbc8c1::t_99a5882ba09cce 16-17,20-21
+  s_01bdef1efbc8c1::t_ea7ac85324ddc3 60-67
+  s_01bdef1efbc8c1::t_c32c87b1e350b0 68-69
+  s_01bdef1efbc8c1::t_be484ea26c45a5 53-56,59
+  s_01bdef1efbc8c1::t_4ab6defa68f6f7 1-15,22-52,57-58,70-74,76-80
+  s_01bdef1efbc8c1::t_be76b603c6f7e6 75
+redirect/gh-proxy/direct-ghproxy-only.yaml
+  s_01bdef1efbc8c1::t_02b032ceebc3f5 1-31
+redirect/test/03-git-lfs-vcjob.yaml
+  s_01bdef1efbc8c1::t_e2f3bc54854b35 133-148
+  s_01bdef1efbc8c1::t_d27eac622ea373 210-212
+  s_01bdef1efbc8c1::t_bfac73841653ce 32-34,36-38
+  s_01bdef1efbc8c1::t_b1503d11380337 108-110,116-119
+  s_01bdef1efbc8c1::t_3f22736208dfa5 1-31,35,39-105,112-113,121-132,149-209,213
+  s_01bdef1efbc8c1::t_6a3607ec13afdd 106-107,111,114-115,120
+redirect/gh-proxy/JUDGEMENT.md
+  s_01bdef1efbc8c1::t_b354a1b8f6899a 30-35
+  s_01bdef1efbc8c1::t_5869acdea7ee64 107
+  s_01bdef1efbc8c1::t_6bc86cc3f37150 103,105-106,114,116-118
+  s_01bdef1efbc8c1::t_1e2b4f408e1f18 279
+  s_01bdef1efbc8c1::t_7af53ac7862ee2 58-63,65-66
+  s_01bdef1efbc8c1::t_562311b36c8b5e 8,11-15
+  s_01bdef1efbc8c1::t_9fec70d162759e 23
+  s_01bdef1efbc8c1::t_6e447f454f0388 168-198
+  s_01bdef1efbc8c1::t_ad7a4eb623abc4 280
+  s_01bdef1efbc8c1::t_4a98b35d6f4a8a 281-283
+  s_01bdef1efbc8c1::t_e25ab0eaa33359 7,9-10,56-57,101,230-231,262-264,270-272
+  s_01bdef1efbc8c1::t_13d119aa5e2b38 304-305
+  s_01bdef1efbc8c1::t_41bae1bbb20e0b 300-301
+  s_01bdef1efbc8c1::t_e71c808bd8ee7b 16-22
+  s_01bdef1efbc8c1::t_003236efc8f84e 251
+  s_01bdef1efbc8c1::t_94f03e5eeeb079 1-6,51-55,64,67-77,79-100,102,104,108-113,115,119,156-167,200,202,221-229,232-236,255-261,265-269,284-288
+  s_01bdef1efbc8c1::t_1e0f39e767019e 237-250,252-254
+  s_01bdef1efbc8c1::t_5d26273925d241 273-278
+  s_01bdef1efbc8c1::t_99fc6e39d376c4 199,201,203-220
+  s_01bdef1efbc8c1::t_72fbb594e96d75 78
+  s_01bdef1efbc8c1::t_0c7076fcd7e43b 24-29
+  s_01bdef1efbc8c1::t_6c89ef5520a880 289-290,294-299
+  s_01bdef1efbc8c1::t_770cfff13f197d 291-293
+  s_01bdef1efbc8c1::t_5494f50b814ca4 302-303
+  s_01bdef1efbc8c1::t_8e586c0cc28231 36-50
+  s_01bdef1efbc8c1::t_41bd11a5a08a53 120-155
+redirect/gh-proxy/resolve-ip-test.yaml
+  s_01bdef1efbc8c1::t_7352663ee286f8 1-28
+redirect/test/01-download-pytorch-connectivity.yaml
+  s_01bdef1efbc8c1::t_585700902b4549 49-50,53,55-68
+  s_01bdef1efbc8c1::t_7c2d16c2276db3 37,40-43
+  s_01bdef1efbc8c1::t_b2c0a54356a14e 74-76
+  s_01bdef1efbc8c1::t_c7aa855b6ce99d 112
+  s_01bdef1efbc8c1::t_d2821d0fc2258b 7-9
+  s_01bdef1efbc8c1::t_3ec800618f8456 99-108
+  s_01bdef1efbc8c1::t_8752c4faf620b1 1-6,10-36,38-39,44-48,51-52,54,69-73,77-98,109-111,113-115
+redirect/SOURCE-REWRITE-ANALYSIS.md
+  s_01bdef1efbc8c1::t_57dd9f6fccc5c8 229-236
+  s_01bdef1efbc8c1::t_c16c8ef9c1b645 248-258
+  s_01bdef1efbc8c1::t_4fb0790e8f16b2 260
+  s_01bdef1efbc8c1::t_6005c2dae0db6b 268,273
+  s_01bdef1efbc8c1::t_15c2b35b1e1058 173,175-176,178-179,190,192-198,202-204,207,209,211,214
+  s_01bdef1efbc8c1::t_0431c370dc18c3 329-371,373,382,389-390,393-416
+  s_01bdef1efbc8c1::t_88dbc44faa8db2 372,374-381,383-388,391-392
+  s_01bdef1efbc8c1::t_152e51a289f097 419
+  s_01bdef1efbc8c1::t_da432444041a34 3,10-13,16-17
+  s_01bdef1efbc8c1::t_f7cb517022efb6 180-183,186-189
+  s_01bdef1efbc8c1::t_9be7a5723a12f6 223,225-227,259,261-262
+  s_01bdef1efbc8c1::t_a69ccbad5b67c1 417-418
+  s_01bdef1efbc8c1::t_1711b53275d81f 208,210,212-213,215-219
+  s_01bdef1efbc8c1::t_2e052dee5c3135 205-206
+  s_01bdef1efbc8c1::t_255f8928911d99 237,239,241-246
+  s_01bdef1efbc8c1::t_05a0137279c42a 8-9
+  s_01bdef1efbc8c1::t_7e7d779af3cc2e 40
+  s_01bdef1efbc8c1::t_43c647881df58a 200-201
+  s_01bdef1efbc8c1::t_62aa5cbdd61167 70,77,81,83-96,102,115,120,122
+  s_01bdef1efbc8c1::t_b546839a2fc1e9 305-328
+  s_01bdef1efbc8c1::t_60ef25f0276db6 1-2,4-7,18-39,41-69,71-76,78-80,82,97-101,103-114,116-119,121,123-164,168-169,220,264-267,269-272,274-304
+  s_01bdef1efbc8c1::t_d813fc826e1b5a 222,224,228,263
+  s_01bdef1efbc8c1::t_ad880a2dcdd6ac 14-15
+  s_01bdef1efbc8c1::t_74834b487e2ab9 170-172,174,177,191,199
+  s_01bdef1efbc8c1::t_384d5f3ee4723c 165-167
+  s_01bdef1efbc8c1::t_b805cf3917f27b 184-185
+  s_01bdef1efbc8c1::t_e5b0270f699b80 221,238,240,247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "71de47bd0ec22d153d0f840a0fec5d15b4b2bdc4",
+  "prompts": {},
+  "sessions": {
+    "s_01bdef1efbc8c1": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a98152b87857a3d213781d7",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "source_scene": "unknown",
+        "tool_type": "agent",
+        "edit_kind": "file_edit",
+        "session_id": "6a98152b87857a3d213781d7",
+        "tool_id": "Edit",
+        "external_session_id": "6a98152b87857a3d213781d7",
+        "dedupe_key": "6a98152b87857a3d213781d7:6a9fb40d1c176cc28c04a276:afterEdit:0c2a6559",
+        "runtime_client": "trae-tob-git-ai",
+        "operation_id": "6a9fb40d1c176cc28c04a276",
+        "client_type": "ide",
+        "tool_use_id": "6a9fb40d1c176cc28c04a276"
+      }
+    }
+  }
+}
