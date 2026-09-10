@@ -1,0 +1,44 @@
+OSS-DEPLOY-RECORD.md
+  h_dc619ff2c05908 7,16,19-20,23-31,38,42,52-76,78-113,116,124,141-159
+  s_c81d848e9ddb33::t_0c6ce3325d04a4 11
+  s_c81d848e9ddb33::t_a853af3f2ccd45 46-51,77,114,117
+  s_c81d848e9ddb33::t_a28bb0d6f60362 1-6,8-10,12-14,17-18,21-22,34-37,39-41,119,121-123,125-137,139
+  s_c81d848e9ddb33::t_2fd6c9443c85d6 43-45
+  s_c81d848e9ddb33::t_99e0cd3435296b 33
+  s_c81d848e9ddb33::t_beca284175effe 115,118,120
+  s_c81d848e9ddb33::t_d851a8b0d76c16 138,140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "1ffc54dcc3576b0bb9a6d24d40d900ebf0441a53",
+  "prompts": {},
+  "humans": {
+    "h_dc619ff2c05908": {
+      "author": "chenqi49 <479148871@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_c81d848e9ddb33": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa26ed21c176cc28c04c0fc",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "dedupe_key": "6aa26ed21c176cc28c04c0fc:6aa290df1c176cc28c04c31c:afterEdit:93cf1b23",
+        "client_type": "ide",
+        "operation_id": "6aa290df1c176cc28c04c31c",
+        "edit_kind": "file_edit",
+        "runtime_client": "trae-tob-git-ai",
+        "external_session_id": "6aa26ed21c176cc28c04c0fc",
+        "source_scene": "unknown",
+        "tool_use_id": "6aa290df1c176cc28c04c31c",
+        "tool_id": "Edit",
+        "session_id": "6aa26ed21c176cc28c04c0fc",
+        "tool_type": "agent"
+      }
+    }
+  }
+}
