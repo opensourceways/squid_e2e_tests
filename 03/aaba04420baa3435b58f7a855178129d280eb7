@@ -1,0 +1,34 @@
+OSS-DEPLOY-RECORD.md
+  s_c81d848e9ddb33::t_79b3e8406a4e4b 4
+  s_c81d848e9ddb33::t_5984b7ce7b4851 40
+  s_c81d848e9ddb33::t_12aa99cdab3139 126,130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "03aaba04420baa3435b58f7a855178129d280eb7",
+  "prompts": {},
+  "sessions": {
+    "s_c81d848e9ddb33": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa26ed21c176cc28c04c0fc",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "edit_kind": "file_edit",
+        "external_session_id": "6aa26ed21c176cc28c04c0fc",
+        "dedupe_key": "6aa26ed21c176cc28c04c0fc:6aa291901c176cc28c04c347:afterEdit:93cf1b23",
+        "runtime_client": "trae-tob-git-ai",
+        "client_type": "ide",
+        "operation_id": "6aa291901c176cc28c04c347",
+        "source_scene": "unknown",
+        "tool_id": "Edit",
+        "session_id": "6aa26ed21c176cc28c04c0fc",
+        "tool_use_id": "6aa291901c176cc28c04c347",
+        "tool_type": "agent"
+      }
+    }
+  }
+}
