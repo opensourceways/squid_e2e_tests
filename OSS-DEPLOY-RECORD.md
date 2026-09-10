@@ -1,7 +1,7 @@
 # 开源仓库部署与贡献记录（OSS Deploy & Contribute Record）
 
 > 记录日期：2026-09-10
-> 用途：留档「维护开源（部署/镜像 Ascend 仓库）」与「贡献开源（向 vllm/verl/sglang 等上游提交）」两条线
+> 用途：留档「主导开源（部署/镜像 Ascend 仓库）」与「参与开源（向 vllm/verl/sglang 等上游提交）」两条线
 > 的现状、问题与待确认事项，重点是 **squid 缓存代理在这两条线中的接入情况**。
 
 ***
@@ -37,7 +37,7 @@
 
 ***
 
-## 1. 维护开源（Maintain Open-source）
+## 1. 主导开源（Lead Open-source）
 
 > 数据来源：`report.html`（Pod 时间统计报告，2026-09-04 00:00 \~ 2026-09-10 07:30，
 > CPU/NPU 项目分布）。从中收集到 **63 个唯一仓库名**（已剔除 runner pod 名，另有 `unknown` 68 次为噪声）。
@@ -123,11 +123,11 @@
 
 ***
 
-## 2. 贡献开源（Contribute Open-source）
+## 2. 参与开源（Contribute Open-source）
 
 ### 2.1 总览：squid 接入状态
 
-- **当前结论：贡献开源列表中的仓库全部暂未走 squid（均为「否」）。**
+- **当前结论：参与开源列表中的仓库全部暂未走 squid（均为「否」）。**
 - 未接入原因：
   1. **runner pod / workflow pod 的注入测试尚未完成**（注入方式待验证）；
   2. **buildkit 场景被卡住**：buildkitd 的 dockerfile 代理与镜像重定向问题未解决。
