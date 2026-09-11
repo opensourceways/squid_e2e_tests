@@ -1,0 +1,32 @@
+OSS-DEPLOY-RECORD.md
+  s_c81d848e9ddb33::t_f8df086b21ba25 79-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "28bd2eb1cf914e18272fc7901ff0d2036749f884",
+  "prompts": {},
+  "sessions": {
+    "s_c81d848e9ddb33": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa26ed21c176cc28c04c0fc",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "edit_kind": "file_edit",
+        "dedupe_key": "6aa26ed21c176cc28c04c0fc:6aa3b6bd1c176cc28c04cc1f:afterEdit:93cf1b23",
+        "session_id": "6aa26ed21c176cc28c04c0fc",
+        "source_scene": "unknown",
+        "runtime_client": "trae-tob-git-ai",
+        "tool_type": "agent",
+        "tool_id": "Edit",
+        "tool_use_id": "6aa3b6bd1c176cc28c04cc1f",
+        "external_session_id": "6aa26ed21c176cc28c04c0fc",
+        "client_type": "ide",
+        "operation_id": "6aa3b6bd1c176cc28c04cc1f"
+      }
+    }
+  }
+}
