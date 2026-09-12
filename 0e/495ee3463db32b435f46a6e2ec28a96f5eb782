@@ -1,0 +1,176 @@
+traffic-test/tool/09-npm.yaml
+  s_10fa17fd464530::t_5f16e9d2f20da3 123,125
+traffic-test/tool/02-apt.yaml
+  s_10fa17fd464530::t_07210070587588 118,120
+traffic-test/tool/11-conda.yaml
+  s_10fa17fd464530::t_51ae30038f6d20 132,134
+traffic-test/tool/16-yum.yaml
+  s_10fa17fd464530::t_0a6170c5aa43c3 125,127
+traffic-test/tool/06-wget.yaml
+  s_10fa17fd464530::t_848a4d45cfd397 119,121
+redirect/test/02-github-archive-git-gy001-x10.yaml
+  s_a9ae88db22638b::t_b299a135fcdf3c 5-6
+  s_a9ae88db22638b::t_750d25d2d92eeb 36,39-40
+  s_a9ae88db22638b::t_c1a5616b205f49 1-4,7-35,37-38,41-54,56-158,160-234,236-333
+  s_a9ae88db22638b::t_182d395c9e99b3 55,159,235
+traffic-test/tool/04-goproxy.yaml
+  s_10fa17fd464530::t_34585f900baabc 158,160
+redirect/test/wget-rc5-debug2.yaml
+  s_a9ae88db22638b::t_f1e14ef6f8fa97 1-62
+deploy/values-gy-005.yaml
+  h_dc619ff2c05908 1,3-4,6-7,11,18,63,70,74
+  s_10fa17fd464530::t_a24b3fe6dbf32c 52-54,57-58
+  s_10fa17fd464530::t_fd6a74f9b8cb2a 2,5,8-10,12-17,19-51,55-56,59-62,64-69,71-73
+traffic-test/tool/05-obs.yaml
+  s_10fa17fd464530::t_c94924402a7f50 147,149
+traffic-test/tool/01-pip.yaml
+  s_10fa17fd464530::t_fe113d53685939 193,195
+redirect/test/02-github-archive-git-gy001.yaml
+  s_a9ae88db22638b::t_4264078c5ec06c 104,197,283
+  s_a9ae88db22638b::t_157ed4381b2206 1,5-33,35-36,39-103,105-196,198-282,284-331
+  s_a9ae88db22638b::t_3827e4696ea97a 34,37-38
+  s_a9ae88db22638b::t_48ef9228a4ca75 2-4
+redirect/test/02-github-archive-git-gy001-x10-delay10.yaml
+  s_a9ae88db22638b::t_7b86dabb0fd9d5 1-338
+redirect/test/02-github-archive-git-gy006-x10.yaml
+  s_a9ae88db22638b::t_3b981622c2c155 4-5
+  s_a9ae88db22638b::t_93f0cbd637a574 54,158,234
+  s_a9ae88db22638b::t_8e66b704598119 1-3,6-34,36-37,40-53,55-157,159-233,235-332
+  s_a9ae88db22638b::t_34b29af5bb7efd 35,38-39
+traffic-test/tool/03-github.yaml
+  s_10fa17fd464530::t_924674f4dda502 115,117
+deploy/DEPLOY.md
+  s_10fa17fd464530::t_247443b2e61a7f 159,161
+  s_6711a6962a7305::t_b3eccb1390046b 229-230,233-237,239-261,275-276,279
+traffic-test/tool/15-pnpm.yaml
+  s_10fa17fd464530::t_5d0cbb4374bf8e 131,133
+traffic-test/tool/10-cargo.yaml
+  s_10fa17fd464530::t_0d16eb6552d364 144,146
+deploy/chart/values.yaml
+  s_10fa17fd464530::t_7c5af0a1f59de0 69-70
+  s_10fa17fd464530::t_e84113c545017f 71
+traffic-test/tool/13-huggingface.yaml
+  s_10fa17fd464530::t_c225449f34cb9c 132,134
+traffic-test/tool/14-gitlfs.yaml
+  s_10fa17fd464530::t_b5f9c018d3d8de 136,138
+redirect/test/wget-rc5-debug3.yaml
+  s_a9ae88db22638b::t_a9b0ff8927eb24 1-58
+deploy/chart/Chart.yaml
+  h_dc619ff2c05908 5
+redirect/test/02-github-archive-git-gy006.yaml
+  s_a9ae88db22638b::t_8e66b704598119 1-330
+.gitignore
+  s_10fa17fd464530::t_66b101cf04d63c 1-2
+redirect/test/wget-rc5-debug.yaml
+  s_a9ae88db22638b::t_bc51615f875585 1-78
+traffic-test/tool/08-bazel.yaml
+  s_10fa17fd464530::t_331da33eefd479 186,188
+deploy/chart/templates/configmap.yaml
+  s_10fa17fd464530::t_f8dddd04a62a17 25-28
+traffic-test/tool/17-docker-pull.yaml
+  s_10fa17fd464530::t_2828080f2f1bf2 131,133
+traffic-test/tool/07-cmake-fetchcontent.yaml
+  s_10fa17fd464530::t_11ae782989c306 137,139
+deploy/SQUID-OVERVIEW.md
+  s_10fa17fd464530::t_df2c15fd68b03a 102
+traffic-test/tool/12-uv.yaml
+  s_10fa17fd464530::t_1c8fa782136276 121,123
+traffic-test/monitor/cn12001-traffic-report.txt
+  s_9fcceae17e19cb::t_9deae13b34950b 1-34,37-41,43-44,47-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "0e495ee3463db32b435f46a6e2ec28a96f5eb782",
+  "prompts": {},
+  "humans": {
+    "h_dc619ff2c05908": {
+      "author": "chenqi49 <479148871@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_10fa17fd464530": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa3cdd21c176cc28c04cc32",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": null,
+      "custom_attributes": {
+        "tool_use_id": "6aa505531c176cc28c04dd0e",
+        "tool_type": "agent",
+        "source_scene": "unknown",
+        "external_session_id": "6aa3cdd21c176cc28c04cc32",
+        "session_id": "6aa3cdd21c176cc28c04cc32",
+        "edit_kind": "file_edit",
+        "client_type": "ide",
+        "tool_id": "Edit",
+        "operation_id": "6aa505531c176cc28c04dd0e",
+        "dedupe_key": "6aa3cdd21c176cc28c04cc32:6aa505531c176cc28c04dd0e:afterEdit:a095b2f4",
+        "runtime_client": "trae-tob-git-ai"
+      }
+    },
+    "s_6711a6962a7305": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a9fb4b11c176cc28c04a288",
+        "model": "glm-5.3__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "operation_id": "6aa10b001c176cc28c04b1c3",
+        "edit_kind": "file_edit",
+        "source_scene": "unknown",
+        "tool_type": "agent",
+        "tool_id": "Edit",
+        "dedupe_key": "6a9fb4b11c176cc28c04a288:6aa10b001c176cc28c04b1c3:afterEdit:213d51aa",
+        "session_id": "6a9fb4b11c176cc28c04a288",
+        "runtime_client": "trae-tob-git-ai",
+        "client_type": "ide",
+        "external_session_id": "6a9fb4b11c176cc28c04a288",
+        "tool_use_id": "6aa10b001c176cc28c04b1c3"
+      }
+    },
+    "s_9fcceae17e19cb": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa278551c176cc28c04c14c",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "session_id": "6aa278551c176cc28c04c14c",
+        "tool_use_id": "6aa27a4c1c176cc28c04c1bf",
+        "client_type": "ide",
+        "edit_kind": "bash",
+        "runtime_client": "trae-tob-git-ai",
+        "tool_name": "RunCommand",
+        "operation_id": "6aa27a4c1c176cc28c04c1bf",
+        "source_scene": "agent",
+        "display_model_name": "DeepSeek-V4-Flash 正式版",
+        "external_session_id": "6aa278551c176cc28c04c14c"
+      }
+    },
+    "s_a9ae88db22638b": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a97a037400d4d142bbebe09",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "source_scene": "unknown",
+        "tool_id": "Write",
+        "session_id": "6a97a037400d4d142bbebe09",
+        "dedupe_key": "6a97a037400d4d142bbebe09:6aa0b8531c176cc28c04ab8a:afterEdit:f50edac4",
+        "runtime_client": "trae-tob-git-ai",
+        "edit_kind": "file_edit",
+        "tool_type": "agent",
+        "client_type": "ide",
+        "tool_use_id": "6aa0b8531c176cc28c04ab8a",
+        "external_session_id": "6a97a037400d4d142bbebe09",
+        "operation_id": "6aa0b8531c176cc28c04ab8a"
+      }
+    }
+  }
+}
