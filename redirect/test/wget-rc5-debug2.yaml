@@ -1,0 +1,62 @@
+# 干净复现 wget rc=5：不信任 CA / 信任 CA / 直连 三对照
+apiVersion: v1
+kind: Pod
+metadata:
+  name: wget-rc5-debug2
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: github-arc-test-gy001-debug2
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/arch: arm64
+  containers:
+  - name: wget
+    image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+    command:
+    - /bin/sh
+    - -c
+    - |
+      set +e
+      U=https://github.com/pybind/pybind11/archive/refs/tags/v2.10.3.zip
+      echo "===== wget 完整版本 ====="
+      wget --version 2>&1 | head -3
+      echo
+      echo "===== T1 不信任 CA + 经 squid 代理 ====="
+      env -u SSL_CERT_FILE -u CURL_CA_BUNDLE \
+        HTTPS_PROXY=http://squid-cache.squid.svc.cluster.local:3128 \
+        https_proxy=http://squid-cache.squid.svc.cluster.local:3128 \
+        NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 \
+        wget -S -O /dev/null --timeout=30 "$U" 2>&1 | tail -12
+      echo "rc(T1)=${PIPESTATUS[0]}"
+      echo
+      echo "===== T2 信任 CA(update-ca-certificates) + 经 squid 代理 ====="
+      mkdir -p /usr/local/share/ca-certificates
+      cp /etc/squid-ca/squid-ca.pem /usr/local/share/ca-certificates/squid-ca.crt
+      update-ca-certificates -f >/dev/null 2>&1
+      HTTPS_PROXY=http://squid-cache.squid.svc.cluster.local:3128 \
+      https_proxy=http://squid-cache.squid.svc.cluster.local:3128 \
+      NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 \
+      wget -S -O /dev/null --timeout=30 "$U" 2>&1 | tail -8
+      echo "rc(T2)=${PIPESTATUS[0]}"
+      echo
+      echo "===== T3 直连(不走代理, 不信任 CA) ====="
+      env -u SSL_CERT_FILE -u CURL_CA_BUNDLE \
+        HTTPS_PROXY= https_proxy= http_proxy= HTTP_PROXY= \
+        wget -S -O /dev/null --timeout=30 "$U" 2>&1 | tail -8
+      echo "rc(T3)=${PIPESTATUS[0]}"
+      exit 0
+    volumeMounts:
+    - mountPath: /etc/squid-ca
+      name: squid-ca
+      readOnly: true
+  imagePullSecrets:
+  - name: huawei-swr-image-pull-secret-model-gy
+  volumes:
+  - name: squid-ca
+    secret:
+      secretName: squid-ca-cert
+      items:
+      - key: squid-ca.pem
+        path: squid-ca.pem

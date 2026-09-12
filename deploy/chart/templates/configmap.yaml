@@ -22,10 +22,10 @@ data:
     # ── SSL Bump 规则 ──
     acl step1 at_step SslBump1
 
-    acl registry ssl::server_name swr.cn-north-4.myhuaweicloud.com
-    acl registry ssl::server_name swr.cn-southwest-2.myhuaweicloud.com
-    acl registry ssl::server_name registry-1.docker.io auth.docker.io
-    acl registry ssl::server_name registry.k8s.io ghcr.io gcr.io quay.io
+    # registry 域名白名单：与 .Values.registryProxy.registries 同源，改动只改 values、无需 bump chart
+    {{- range $d := splitList " " .Values.registryProxy.registries }}
+    acl registry ssl::server_name {{ $d }}
+    {{- end }}
 
     ssl_bump peek step1
     ssl_bump splice registry

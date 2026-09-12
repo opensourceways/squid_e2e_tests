@@ -66,7 +66,9 @@ exporter:
 
 registryProxy:
   enabled: true
-  registries: "swr.cn-north-4.myhuaweicloud.com swr.cn-southwest-2.myhuaweicloud.com registry.k8s.io ghcr.io gcr.io quay.io"
+  # 域名白名单（空格分隔）：同时作为 rpardini 代理/缓存清单 和 squid.conf `acl registry` 的输入。
+  # 增删域名只改这里即可，无需 bump chart 版本。
+  registries: "swr.cn-north-4.myhuaweicloud.com swr.cn-southwest-2.myhuaweicloud.com swr.cn-north-12.myhuaweicloud.com registry.k8s.io ghcr.io gcr.io quay.io"
   enableManifestCache: "false"
   cacheMaxSize: "100g"
   allowPush: "true"

@@ -1,0 +1,74 @@
+# ⚠️ 本文件是 **gy-005 集群**（openmerlin-guiyang-005）的 values 文件
+#
+# 部署方式（ArgoCD 管理，app 定义见 argocd/clusters/gy-005/squid-rpardini.yaml）：
+#   helm install squid ./chart -n squid -f values-gy-005.yaml --kubeconfig ~/.kube/gy-005.yaml
+#
+# gy-005 为全新部署（此前无 squid）；采用新架构：StatefulSet + registry-proxy + exporter，
+# CA 走 Vault secretDefinition（与 gy-001/002/wlcb-001 一致）。
+#
+# 新 chart 是全新 StatefulSet，volumeClaimTemplates 无历史约束，size 直接生效。
+#
+# Environment gy-005: 双活（replicas=2，SQUID-OVERVIEW §7）
+replicas: 2
+
+# 节点架构：新 chart 镜像 v7.7.1 在 gy-001/002/006 均为 amd64 运行，故选 amd64。
+nodeSelector:
+  kubernetes.io/arch: amd64
+
+# squid 命名空间需存在该 SWR pull secret（拉取 modelfoundry 私有镜像）；如缺先创建或按需调整
+imagePullSecrets:
+- name: huawei-swr-image-pull-secret-model-gy
+
+squid:
+  # 缓存上限 204800 MB = 200 GiB，与 squidCache PVC 对齐（同其他集群 200G 升级）
+  cacheDiskSize: 204800
+  maxObjectSize: 8192
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+
+registryProxy:
+  # registry 域 splice 到同 Pod 的 rpardini sidecar，blob 缓存 150G（PVC 200Gi）
+  cacheMaxSize: "150g"
+  proxyReadTimeout: "300s"
+  proxySendTimeout: "300s"
+  proxyConnectReadTimeout: "300s"
+  sendTimeout: "300s"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 8
+      memory: 16Gi
+
+persistence:
+  squidCache:
+    size: 200Gi
+    # squid-subpath-sc：subpath 模式，share=b46afb97-6954-11f1-af0f-fa16412f71d0，
+    # 父目录 /squid-cache，每个 PVC（含双副本）自动独立子目录，天然隔离（SC 已在 gy-005 创建）
+    storageClass: squid-subpath-sc
+  registryCache:
+    size: 400Gi
+    # 与 squidCache 共用同一 SC：Everest 按 PVC 自动分配独立子目录，与 squid 缓存互不冲突
+    storageClass: squid-subpath-sc
+
+# CA 从 Vault(secrets/data/ascend/ci) 同步，生产 `_prod` key（与 gy-001/002/wlcb-001 一致）：
+#   - squid 命名空间生成 secret squid-ca（squid-ca-bundle.pem + squid-ca.pem）
+#   - 每个 caNamespaces 生成 secret squid-ca-cert（squid-ca.pem + squid-bazel-trust.jks）
+# ⚠️ 注意：CA 需与各 CI 客户端现有信任配置一致，否则 TLS 握手失败（见 UPGRADE 文档 Phase 3）。
+secretDefinition:
+  enabled: true
+  vaultPath: secrets/data/ascend/ci
+  caBundleKey: squid_ca_bundle_v3_prod_pem
+  caPublicKey: squid_ca_v3_prod_pem
+  caTruststoreKey: squid_bazel_trust_v3_prod_jks
+  # gy-005 跑 CI 的命名空间（GHA runner + buildkitd 等），按实际调整
+  caNamespaces:
+  - squid
+  - nv-action
+

@@ -1,0 +1,78 @@
+# 一次性调试 pod：验证 gy-001 x10 测试中 wget rc=5 的真实含义
+#   (a) wget 实现版本（GNU vs BusyBox 退出码语义不同）
+#   (b) 不信任 squid CA 走 squid 代理拉 GHZIP → 看退出码与错误原文
+#   (c) 注入 squid CA 后再试 → 对照退出码
+apiVersion: v1
+kind: Pod
+metadata:
+  name: wget-rc5-debug
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: github-arc-test-gy001-debug
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/arch: arm64
+  containers:
+  - name: wget
+    image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+    command:
+    - /bin/sh
+    - -c
+    - |
+      set +e
+      echo "===== (a) wget 实现 ====="
+      wget --version 2>&1 | head -2
+      echo
+      echo "===== (b) 不信任 squid CA，经 squid 代理拉 GHZIP ====="
+      HTTPS_PROXY=http://squid-cache.squid.svc.cluster.local:3128 \
+      https_proxy=http://squid-cache.squid.svc.cluster.local:3128 \
+      NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 \
+      wget -S -q -O /dev/null --timeout=30 \
+        https://github.com/pybind/pybind11/archive/refs/tags/v2.10.3.zip 2>&1 | head -15
+      echo "rc(b)=$?"
+      echo
+      echo "===== (c) 注入 squid CA 后再试 ====="
+      mkdir -p /usr/local/share/ca-certificates
+      cp /etc/squid-ca/squid-ca.pem /usr/local/share/ca-certificates/squid-ca.crt
+      update-ca-certificates -f >/dev/null 2>&1
+      HTTPS_PROXY=http://squid-cache.squid.svc.cluster.local:3128 \
+      https_proxy=http://squid-cache.squid.svc.cluster.local:3128 \
+      NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 \
+      wget -S -q -O /dev/null --timeout=30 \
+        https://github.com/pybind/pybind11/archive/refs/tags/v2.10.3.zip 2>&1 | head -15
+      echo "rc(c)=$?"
+      exit 0
+    env:
+    - name: MODE
+      value: with-squid
+    - name: HTTP_PROXY
+      value: http://squid-cache.squid.svc.cluster.local:3128
+    - name: HTTPS_PROXY
+      value: http://squid-cache.squid.svc.cluster.local:3128
+    - name: http_proxy
+      value: http://squid-cache.squid.svc.cluster.local:3128
+    - name: https_proxy
+      value: http://squid-cache.squid.svc.cluster.local:3128
+    - name: NO_PROXY
+      value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+    - name: no_proxy
+      value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+    - name: SSL_CERT_FILE
+      value: /etc/squid-ca/squid-ca.pem
+    - name: CURL_CA_BUNDLE
+      value: /etc/squid-ca/squid-ca.pem
+    volumeMounts:
+    - mountPath: /etc/squid-ca
+      name: squid-ca
+      readOnly: true
+  imagePullSecrets:
+  - name: huawei-swr-image-pull-secret-model-gy
+  volumes:
+  - name: squid-ca
+    secret:
+      secretName: squid-ca-cert
+      items:
+      - key: squid-ca.pem
+        path: squid-ca.pem

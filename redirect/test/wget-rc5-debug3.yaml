@@ -1,0 +1,58 @@
+# 深挖 T2 异常：MITM 证书 issuer vs 挂载 CA
+apiVersion: v1
+kind: Pod
+metadata:
+  name: wget-rc5-debug3
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: github-arc-test-gy001-debug3
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/arch: arm64
+  containers:
+  - name: wget
+    image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+    command:
+    - /bin/sh
+    - -c
+    - |
+      set +e
+      U=https://github.com/pybind/pybind11/archive/refs/tags/v2.10.3.zip
+      echo "===== A. 挂载 CA 指纹与 subject ====="
+      openssl x509 -in /etc/squid-ca/squid-ca.pem -noout -subject -issuer -fingerprint -sha256 2>&1
+      echo
+      echo "===== B. update-ca-certificates 真实输出 ====="
+      mkdir -p /usr/local/share/ca-certificates
+      cp /etc/squid-ca/squid-ca.pem /usr/local/share/ca-certificates/squid-ca.crt
+      update-ca-certificates -f 2>&1 | tail -5
+      echo "rc(update-ca)=$?"
+      echo
+      echo "===== C. 显式 --ca-certificate 经代理 ====="
+      HTTPS_PROXY=http://squid-cache.squid.svc.cluster.local:3128 \
+      https_proxy=http://squid-cache.squid.svc.cluster.local:3128 \
+      NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 \
+      env -u SSL_CERT_FILE -u CURL_CA_BUNDLE \
+      wget --ca-certificate=/etc/squid-ca/squid-ca.pem -S -O /dev/null --timeout=30 "$U" 2>&1 | tail -6
+      echo "rc(C)=${PIPESTATUS[0]}"
+      echo
+      echo "===== D. openssl s_client 抓 squid MITM 证书 (SNI github.com) ====="
+      openssl s_client -connect squid-cache.squid.svc.cluster.local:3129 -servername github.com -showcerts </dev/null 2>&1 | grep -E 'subject=|issuer=|Verify return code|verify error' | head -12
+      echo
+      echo "===== E. s_client 连 3128(Service) 看 CN ====="
+      echo | openssl s_client -connect squid-cache.squid.svc.cluster.local:3128 -servername github.com 2>&1 | grep -E 'subject=|issuer=|Verify return code' | head -6
+      exit 0
+    volumeMounts:
+    - mountPath: /etc/squid-ca
+      name: squid-ca
+      readOnly: true
+  imagePullSecrets:
+  - name: huawei-swr-image-pull-secret-model-gy
+  volumes:
+  - name: squid-ca
+    secret:
+      secretName: squid-ca-cert
+      items:
+      - key: squid-ca.pem
+        path: squid-ca.pem

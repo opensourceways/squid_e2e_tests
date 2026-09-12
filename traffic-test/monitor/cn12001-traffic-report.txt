@@ -1,25 +1,48 @@
-Domain                                             MISS_Cnt   MISS_MB  HIT_Cnt    HIT_MB REVAL_Cnt  REVAL_MB  Total_MB EffHit%
-==============================================================================================================================
-obs.cn-north-12.myhuaweicloud.com                       349  238366.8        0       0.0         0       0.0  238366.8     0.0
-gh-proxy.test.osinfra.cn                                211    2932.0        0       0.0         0       0.0    2932.0     0.0
-security.ubuntu.com                                      37      68.5        0       0.0       158     432.4     500.9    86.3
-squid-cache                                           74069     196.1        0       0.0         0       0.0     196.1     0.0
-dl-cdn.openeuler.openatom.cn                             75      97.5       36      82.2         0       0.0     179.7    45.8
-pypi.org                                                 12     169.9        1       0.0         0       0.0     169.9     0.0
-ports.ubuntu.com                                         66      74.8        0       0.0        18      45.3     120.1    37.7
-archive.ubuntu.com                                       61      62.9        0       0.0        13      33.0      96.0    34.4
-obs-community.obs.cn-north-1.myhuaweicloud.com            4      17.1        4      17.1         0       0.0      34.3    50.0
-ascend-artifcat-packages.obs.cn-north-4.myhuaweicloud.com      220       1.7        0       0.0         0       0.0       1.7     0.0
-swr.cn-north-12.myhuaweicloud.com                       626       0.9        0       0.0         0       0.0       0.9     0.0
+Domain                                             MISS_Cnt   MISS_MB ABORT_Cnt  ABORT_MB  HIT_Cnt    HIT_MB REVAL_Cnt  REVAL_MB  Total_MB EffHit%
+==================================================================================================================================================
+obs.cn-north-12.myhuaweicloud.com                       698  394871.1         0       0.0        0       0.0         0       0.0  394871.1     0.0
+gh-proxy.test.osinfra.cn                                591    8857.3         0       0.0        0       0.0         0       0.0    8857.3     0.0
+security.ubuntu.com                                      95     161.5         3       2.4        0       0.0      1002    2610.3    2774.1    94.1
+squid-cache                                          627535    1680.1         2       0.0        0       0.0         0       0.0    1680.1     0.0
+ports.ubuntu.com                                        149     248.9         0       0.0      361     222.1       322     794.6    1265.7    80.3
+archive.ubuntu.com                                      117     185.2         0       0.0      338     210.7       267     602.8     998.7    81.5
+cache-service.nginx-pypi-cache.svc.cluster.local         16     567.7         1       0.0        1      19.9         0       0.0     587.6     3.4
+obs-community.obs.cn-north-1.myhuaweicloud.com            4      17.1         0       0.0       81     347.6         8      34.3     399.0    95.7
+productionresultssa0.blob.core.windows.net              277     256.3         0       0.0        0       0.0         0       0.0     256.3     0.0
+dl-cdn.openeuler.openatom.cn                             75      97.5         0       0.0       36      82.2         0       0.0     179.7    45.8
+pypi.org                                                  5     130.3         7      39.7        1       0.0         0       0.0     169.9     0.0
+productionresultssa14.blob.core.windows.net             491     161.1         0       0.0        0       0.0         0       0.0     161.1     0.0
+productionresultssa13.blob.core.windows.net             902     156.7         1       1.9        0       0.0         0       0.0     158.6     0.0
+productionresultssa8.blob.core.windows.net              933     145.5         1       3.6        0       0.0         0       0.0     149.1     0.0
+productionresultssa5.blob.core.windows.net               89     126.9         0       0.0        0       0.0         0       0.0     126.9     0.0
+productionresultssa4.blob.core.windows.net               85     125.3         1       1.4        0       0.0         0       0.0     126.7     0.0
+productionresultssa19.blob.core.windows.net             415      99.5         1       1.8        0       0.0         0       0.0     101.4     0.0
+productionresultssa10.blob.core.windows.net            1537      78.9         1       0.0        0       0.0         0       0.0      78.9     0.0
+productionresultssa3.blob.core.windows.net             1439      63.9         0       0.0        0       0.0         0       0.0      63.9     0.0
+productionresultssa12.blob.core.windows.net              73      59.2         0       0.0        0       0.0         0       0.0      59.2     0.0
+productionresultssa11.blob.core.windows.net             132      29.4         0       0.0        0       0.0         0       0.0      29.4     0.0
+productionresultssa2.blob.core.windows.net              949      27.9         0       0.0        0       0.0         0       0.0      27.9     0.0
+productionresultssa17.blob.core.windows.net              82      25.1         0       0.0        0       0.0         0       0.0      25.1     0.0
+productionresultssa6.blob.core.windows.net             1034      19.5         0       0.0        0       0.0         0       0.0      19.5     0.0
+productionresultssa1.blob.core.windows.net              771      19.4         0       0.0        0       0.0         0       0.0      19.4     0.0
+productionresultssa7.blob.core.windows.net             1218      17.8         0       0.0        0       0.0         0       0.0      17.8     0.0
+productionresultssa18.blob.core.windows.net             774      17.2         1       0.1        0       0.0         0       0.0      17.3     0.0
+ascend-artifcat-packages.obs.cn-north-4.myhuaweicloud.com     2092      16.8         0       0.0        0       0.0         0       0.0      16.8     0.0
+productionresultssa9.blob.core.windows.net              699       8.3         0       0.0        0       0.0         0       0.0       8.3     0.0
+productionresultssa15.blob.core.windows.net              19       7.9         0       0.0        0       0.0         0       0.0       7.9     0.0
+swr.cn-north-12.myhuaweicloud.com                      4523       6.5         0       0.0        0       0.0         0       0.0       6.5     0.0
+results-receiver.actions.githubusercontent.com         2067       1.2         1       0.0        0       0.0         0       0.0       1.2     0.0
 
 --- Summary ---
-Total MISS:        241989.0 MB (76931 requests)
-Total HIT:         99.4 MB (41 requests)
-Total REVALIDATED: 510.7 MB (189 requests, ~304 overhead)
-Total Traffic:     242599.1 MB
+Total MISS:        408288.1 MB (651809 requests)
+Total HIT:         882.5 MB (818 requests)
+Total REVALIDATED: 4042.0 MB (1599 requests, ~304 overhead)
+Total ABORTED:     50.9 MB (31 requests, client/network aborted - not real traffic)
+Total Traffic:     413263.4 MB
 
-Effective Hit Ratio (HIT + REVAL):  0.3%
-Origin Bandwidth Saved:             0.3%
+Effective Hit Ratio (HIT + REVAL):  1.2%
+Origin Bandwidth Saved:             1.2%
 
 Note: REVALIDATED = TCP_REFRESH_UNMODIFIED (304 Not Modified from origin)
       Client received full object from cache, origin only sent 304 header
+      ABORTED = TCP_*_ABORTED, size 为 abort 前已传字节(通常 0)，不计入 HIT/MISS
