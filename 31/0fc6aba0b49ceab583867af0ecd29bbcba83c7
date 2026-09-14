@@ -1,0 +1,19 @@
+no-proxy-audit/RUNNER-NO-PROXY-AUDIT.md
+  s_10fa17fd464530::t_3272064a32d1b3 1-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "310fc6aba0b49ceab583867af0ecd29bbcba83c7",
+  "prompts": {},
+  "sessions": {
+    "s_10fa17fd464530": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa3cdd21c176cc28c04cc32",
+        "model": "glm-5.3-flash__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>"
+    }
+  }
+}
