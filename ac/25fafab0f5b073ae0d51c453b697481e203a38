@@ -1,0 +1,32 @@
+no-proxy-audit/RUNNER-NO-PROXY-AUDIT.md
+  s_10fa17fd464530::t_0f64c78b1ba431 51-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "ac25fafab0f5b073ae0d51c453b697481e203a38",
+  "prompts": {},
+  "sessions": {
+    "s_10fa17fd464530": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa3cdd21c176cc28c04cc32",
+        "model": "glm-5.3__dev"
+      },
+      "human_author": "chenqi49 <479148871@qq.com>",
+      "custom_attributes": {
+        "dedupe_key": "6aa3cdd21c176cc28c04cc32:6aa75d441c176cc28c04e58b:afterEdit:5d9477bf",
+        "tool_id": "Edit",
+        "operation_id": "6aa75d441c176cc28c04e58b",
+        "source_scene": "unknown",
+        "runtime_client": "trae-tob-git-ai",
+        "external_session_id": "6aa3cdd21c176cc28c04cc32",
+        "tool_type": "agent",
+        "session_id": "6aa3cdd21c176cc28c04cc32",
+        "tool_use_id": "6aa75d441c176cc28c04e58b",
+        "client_type": "ide",
+        "edit_kind": "file_edit"
+      }
+    }
+  }
+}
