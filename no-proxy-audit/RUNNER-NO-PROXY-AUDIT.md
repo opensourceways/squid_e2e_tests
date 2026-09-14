@@ -48,7 +48,12 @@
   1. 测试 pod 内 `getent hosts swr.cn-southwest-2.myhuaweicloud.com`——解析到 `172.x/10.x` 内网 IP → 有内网通路；
   2. 同一小镜像各做 `docker pull` + `docker push` 两遍：一遍 `NO_PROXY=swr.cn-southwest-2.myhuaweicloud.com`（直连），一遍走 squid，对比成败/耗时；
   3. squid access.log `grep swr.cn-southwest-2` 查 PUT 的状态码是否有异常。
-- 判定标准：内网解析成功 → no_proxy 直连；仅公网 → pull 走 squid（rpardini 缓存收益），push 直连。
+- 判定标准（**修正**：早版"pull 走 squid、push 直连"不可行——docker/containerd 代理配置无方法粒度，
+  no_proxy 只匹配域名，squid 在 CONNECT+splice 下看不到方法，整条链路没有任何一层能按 GET/PUT 分流）：
+  - 内网解析成功 → 整域 no_proxy 直连（push+pull 都直连，放弃 rpardini pull 缓存）；
+  - 仅公网 → **pull+push 全走 squid→rpardini**，依赖 rpardini 对 push 透传（其设计即 pull 缓存/push 透传，
+    但分块 blob PATCH 上传、307 存储后端重定向是已知风险点，靠上面步骤 2/3 实测裁决）；
+  - 若实测 push 过 rpardini 失败 → 整域 no_proxy 直连（牺牲 pull 缓存收益），**没有第三条路**。
 
 ### 2.2 OBS 端点（`vllm-ascend.obs.cn-north-4.myhuaweicloud.com` 与 runs-on/cache 后端 `obs.ap-southeast-1.myhuaweicloud.com`）
 
