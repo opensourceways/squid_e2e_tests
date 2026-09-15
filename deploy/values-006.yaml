@@ -33,7 +33,7 @@ squid:
   # enabled:false 骨架与 peers 语法示例，历史实测见 redirect/cachepeer/JUDGEMENT.md）
 
   # 纯 rewrite 架构（chart 0.1.15 转正，8 用例实测全绿见 redirect/test/）：
-  #   pypi index→tuna / github archive+releases→gh-proxy / go→goproxy.cn / apt→huaweicloud
+  #   pypi index→huaweicloud / github archive+releases→gh-proxy / go→goproxy.cn / apt→huaweicloud
   #   registry splice 与白名单外流量原样放行；helper 全灭 1s 自愈、降级直连（P5 实测）
   urlRewrite:
     enabled: true

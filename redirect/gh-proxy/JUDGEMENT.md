@@ -67,6 +67,14 @@
 > codeload 不重写（官方直连+squid 长缓存 TCP_HIT 最优）、archive/releases→gh-proxy 前缀
 > （gh-proxy 服务端消化 302，请求不打 github.com:443 绕开限流）、git clone/API/raw 不重写
 > （走 insteadOf）。详见 `redirect/gh-proxy/clientfirst-rewrite/TEST-WORKFLOW.md`。
+>
+> **修订⑦追记（2026-09-15，chart 0.1.16）**：pypi 重写目标 tuna → **huaweicloud**
+> （`repo.huaweicloud.com/repository/pypi/simple/`，用户拍板与 apt 统一华为云源）。华为云
+> /simple 页面 href 为相对路径 `../../packages/*` → pip 解析回同域 `/repository/pypi/packages/`
+> = 索引×对象同源无混源；对象 wheel 实测 TCP_MEM_HIT（8ms）。tuna 为实测验证形态留档；
+> tuna refresh_pattern 保留作客户端显式 `-i tuna` 直连兜底。**运维教训**：CM 内容变更不改
+> STS pod template → helm upgrade 后 pod 不滚动，且 subPath 挂载不热更新——CM 变更后必须
+> `kubectl rollout restart sts/squid-cache`（本次实测：restart 前重写仍走旧目标 tuna）。
 
 ## 一、一句话判断
 

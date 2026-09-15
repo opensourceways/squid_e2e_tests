@@ -2,16 +2,16 @@
 #
 # 前置：squid CM 含 rewrite-helper.sh（规则对齐 SOURCE-REWRITE-ANALYSIS.md，
 #       见 redirect/gh-proxy/clientfirst-rewrite/gy006-backup-20260915/）：
-#   ① pypi.org/simple → tuna/simple（index-only，对象域放行官方 = 同源）
+#   ① pypi.org/simple → repo.huaweicloud.com/repository/pypi/simple（index-only，对象同域无混源）
 #   ② github.com archive/releases → gh-proxy 前缀（服务端消化 302/签名 URL）
 #   ③ proxy.golang.org → goproxy.cn（绕开 Google egress 阻断）
 #   ④ codeload / files.pythonhosted / download-r2 / pytorch 一律不重写（混源禁令）
-# 配套 refresh_pattern：gh-proxy archive/tags 与 releases 的确定性 URL 长缓存（chart 0.1.15）。
+# 配套 refresh_pattern：gh-proxy archive/tags 与 releases 的确定性 URL 长缓存（chart 0.1.11）。
 #
 # 覆盖场景（各 MISS→HIT 两发，验证重写 + 本地缓存闭环）：
 #   A. github archive（github.com/.../archive/...）→ gh-proxy，TCP_HIT
 #   B. github releases（签名 URL 域）→ gh-proxy，TCP_HIT
-#   C. pypi 索引 → tuna /simple；wheel 对象 → pypi.org/packages 官方域放行（仍被 bump 缓存）
+#   C. pypi 索引 → huaweicloud /repository/pypi/simple；对象 → 同域 packages（相对 href）
 #   D. go 模块 → goproxy.cn
 #   E. pytorch 不重写：索引 + download-r2 wheel 官方直取（bump 本地缓存 MISS→HIT）
 #
@@ -89,12 +89,12 @@ spec:
           REL="https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine-v1.18.0-x86_64-unknown-linux-gnu.tar.gz"
           probe "B-miss" "$REL"
           probe "B-hit " "$REL"
-          echo "===== C. pypi：索引→tuna /simple；对象→官方域放行 ====="
+          echo "===== C. pypi：索引→huaweicloud simple；对象→同域 packages ====="
           probe "C-idx1" "https://pypi.org/simple/requests/"
           probe "C-idx2" "https://pypi.org/simple/requests/"
-          # 从 tuna 索引解析出的对象 URL 是官方域形态（pip 视角 pypi.org/packages/...）
-          probe "C-obj1" "https://pypi.org/packages/source/r/requests/requests-2.31.0.tar.gz"
-          probe "C-obj2" "https://pypi.org/packages/source/r/requests/requests-2.31.0.tar.gz"
+          # 华为云 /simple 页面 href 为相对路径 ../../packages/* → pip 解析为同域对象 URL
+          probe "C-obj1" "https://repo.huaweicloud.com/repository/pypi/packages/source/r/requests/requests-2.31.0.tar.gz"
+          probe "C-obj2" "https://repo.huaweicloud.com/repository/pypi/packages/source/r/requests/requests-2.31.0.tar.gz"
           echo "===== D. go → goproxy.cn ====="
           probe "D-mod1" "https://proxy.golang.org/golang.org/x/net/@v/v0.17.0.mod"
           probe "D-mod2" "https://proxy.golang.org/golang.org/x/net/@v/v0.17.0.mod"

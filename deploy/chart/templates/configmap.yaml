@@ -66,7 +66,7 @@ data:
     {{- end }}
 
     # ── §4.5 url_rewrite（client-first 下 https 域透明重写，chart 0.1.15 转正）──
-    # helper 见 squid-rewrite-helper CM（values squid.urlRewrite）。重写发生在 peer_select
+    # helper 见本 CM 末尾 rewrite-helper.sh（values squid.urlRewrite）。重写发生在 peer_select
     # 之前：被重写域（pypi/go/apt/github archive）的 cache_peer 永不命中，勿同时配置。
     # helper 失败语义：全灭 1s 内自动重生、期间原样放行（P5 破坏性实测零 5xx）。
     {{- if .Values.squid.urlRewrite.enabled }}
@@ -94,6 +94,13 @@ data:
     refresh_pattern -i \.whl$  10080 100% 525600 ignore-reload override-expire ignore-no-store
     refresh_pattern -i \.crate$ 10080 100% 525600 ignore-reload override-expire ignore-no-store
     refresh_pattern -i \.deb$  10080 100% 525600 ignore-reload override-expire ignore-no-store
+    # npm tarball / RPM immutable 长缓存（no-mirror-test 规则 6/11 键漂移配套；npm 元数据与
+    # rsproxy index 走 .crate$/catch-all 已覆盖）
+    refresh_pattern -i registry\.npmmirror\.com/.*\.tgz$ 10080 100% 525600 ignore-reload override-expire ignore-no-store
+    refresh_pattern -i \.rpm$  10080 100% 525600 ignore-reload override-expire ignore-no-store
+    # Go 发行版 tarball（helper 规则 5b 键漂移配套：go.dev/dl、dl.google.com/go →
+    # mirrors.aliyun.com/golang；发行版 immutable，文件名唯一）
+    refresh_pattern -i mirrors\.aliyun\.com/golang/go1\..*\.tar\.gz$ 10080 100% 525600 ignore-reload override-expire ignore-no-store
     # B 类可变内容（权重/分支归档）：尊重 LM 老化，不强制 fresh
     refresh_pattern -i \.(pth|pt|safetensors)$ 0 20% 4320
     refresh_pattern -i codeload\.github\.com/.*/refs/heads/ 0 20% 4320
@@ -110,6 +117,8 @@ data:
     # 纯 rewrite 键漂移配套（redirect/gh-proxy/clientfirst-rewrite）：apt 域经 helper
     # host-swap 后键=huaweicloud，原 .ubuntu.com 规则不再命中——补同参数规则
     refresh_pattern -i repo\.huaweicloud\.com/(ubuntu|ubuntu-ports)/ 0 20% 4320 ignore-private
+    # tuna 不再是 pypi 重写目标（0.1.16 起 pypi→huaweicloud），但客户端显式 -i tuna 直连
+    # 的流量不经 helper，键仍为 tuna——保留兜底，避免落到 catch-all 逐次回源
     refresh_pattern -i mirrors\.tuna\.tsinghua\.edu\.cn/.*/simple/ 0 20% 4320 ignore-private ignore-reload
     refresh_pattern -i \.pypi\.org/.* 0 20% 4320 ignore-private
     refresh_pattern -i \.golang\.org/.* 0 20% 4320 ignore-private
@@ -163,33 +172,65 @@ data:
     # 协议（squid 5+，url_rewrite_children 未配 concurrency → 无 channel-ID）：
     #   输入：<URL> [extras]；输出：OK rewrite-url="新URL"（改写）/ OK（不改写）/ ERR
     #
-    # 规则边界（对齐 SOURCE-REWRITE-ANALYSIS.md，2026-09-15 定稿）：
-    #   1. 对象域绝不单独重写（混源禁令）：files.pythonhosted / download-r2 / codeload 一律放行
-    #   2. pypi 只重写索引 → tuna/simple/。tuna /simple 页面 href 为相对路径 → pip 解析成
-    #      pypi.org/packages/* 官方对象域 → 放行直连 = 官方索引×官方对象同源，squid 本地缓存照吃
-    #   3. codeload 不重写：官方直连 + squid 长缓存最优（并发 30/30、TCP_HIT 3-4ms 实测；
-    #      gh-proxy 白名单本就拒绝 codeload 形态）
-    #   4. archive / releases/download → gh-proxy 前缀（用户拍板 2026-09-15，取代 codeload
-    #      路径手术）：gh-proxy 直接认两形态（实测 200），服务端吸收 302，请求不打
-    #      github.com:443（绕开限流）；键=gh-proxy URL，配合上方 gh-proxy refresh_pattern
-    #      实现 TCP_HIT。git clone / API / raw 不重写（走 insteadOf 客户端方案）
-    #   5. apt → 华为云 host 交换（SOURCE-REWRITE-ANALYSIS 类型二：相对路径源，索引/对象全由
-    #      客户端从 base 拼相对路径生成，host 交换结构上无混源；apt 校验 InRelease/SHA256SUMS
-    #      兜底；apt-get update 实测 14.3s→1.4s，键漂移由上方 huaweicloud refresh_pattern 补齐）
-    #   6. pytorch 不重写（官方可达 + 默认 bump 已缓存；重写只作废缓存键 + 新增镜像依赖）
-    #   7. 白名单外原样放行（OK）；helper 全灭时 squid 1s 内重生、期间原样放行（P5 实测零失败）
+    # 规则边界（对齐 SOURCE-REWRITE-ANALYSIS.md + redirect/no-mirror-test，2026-09-15 定稿）：
+    #   1. pypi 索引 → repo.huaweicloud.com/repository/pypi/simple/（2026-09-15 用户拍板
+    #      与 apt 统一走华为云；实测验证形态 tuna 见 JUDGEMENT 修订⑦）。华为云 /simple 页面
+    #      href 为相对路径 ../../packages/* → pip 解析回 repo.huaweicloud.com 同域对象
+    #      = 索引×对象同源，无混源；wheel 缓存由 .whl$ 规则覆盖
+    #   2. files.pythonhosted/packages → 华为云 packages 同构 host 交换（对象域兜底：客户端
+    #      硬编码官方对象 URL 时仍落华为云；路径结构完全同构）
+    #   3. archive / releases/download → gh-proxy 前缀：gh-proxy 直接认两形态（实测 200），
+    #      服务端吸收 302，请求不打 github.com:443（绕开限流）；键=gh-proxy URL，配合上方
+    #      gh-proxy refresh_pattern 实现 TCP_HIT。git clone / API 不重写（clone 实验 TODO
+    #      见 redirect/no-mirror-test §8；raw → gh-proxy 已覆盖，见规则 10）
+    #   4. raw.githubusercontent → gh-proxy 前缀（gh-proxy 白名单支持 raw 形态）
+    #   5. go → goproxy.cn（sumdb 校验走 GOPROXY 路径一并重写，无需 GOSUMDB）；
+    #      Go 发行版 tarball（go.dev/dl、dl.google.com/go）→ mirrors.aliyun.com/golang
+    #      （路径同构、文件名唯一；老 go GOTOOLCHAIN 解析缺陷与重写无关）
+    #   6. apt → 华为云 host 交换（相对路径源，索引/对象全由客户端从 base 拼相对路径生成，
+    #      host 交换结构上无混源；apt 校验 InRelease/SHA256SUMS 兜底；键漂移由上方
+    #      huaweicloud refresh_pattern 补齐）
+    #   7. npm → npmmirror host 交换（路径完全同构；tarball immutable，.tgz 长缓存见上方）
+    #   8. cargo → rsproxy：index.crates.io→rsproxy/index（sparse index 可达），其 config.json
+    #      的 dl 指回 rsproxy/crates → tarball 随之透明；static.crates.io/crates 兜底显式请求；
+    #      .crate$ 长缓存规则已有
+    #   9. conda → tuna：conda.anaconda.org→anaconda/cloud/<ch>、repo.anaconda.com/pkgs|
+    #      miniconda→anaconda/（结构与 tuna 完全同构）
+    #  10. openEuler yum → 华为云 host 交换（路径同构；.rpm immutable 长缓存见上方）
+    #  11. pytorch / openmmlab / OBS / api.github.com 等官方源不重写（官方可达或无同构镜像）
+    #  12. 白名单外原样放行（OK）；helper 全灭时 squid 1s 内重生、期间原样放行（P5 实测零失败）
     while read -r url _rest; do
       case "$url" in
         https://pypi.org/simple/*)
-          echo "OK rewrite-url=\"https://pypi.tuna.tsinghua.edu.cn/simple/${url#https://pypi.org/simple/}\"" ;;
+          echo "OK rewrite-url=\"https://repo.huaweicloud.com/repository/pypi/simple/${url#https://pypi.org/simple/}\"" ;;
+        https://files.pythonhosted.org/packages/*)
+          echo "OK rewrite-url=\"https://repo.huaweicloud.com/repository/pypi/packages/${url#https://files.pythonhosted.org/packages/}\"" ;;
         https://github.com/*/archive/*|https://github.com/*/releases/download/*)
+          echo "OK rewrite-url=\"https://{{ .Values.squid.urlRewrite.ghProxyHost }}/${url}\"" ;;
+        https://raw.githubusercontent.com/*)
           echo "OK rewrite-url=\"https://{{ .Values.squid.urlRewrite.ghProxyHost }}/${url}\"" ;;
         https://proxy.golang.org/*)
           echo "OK rewrite-url=\"https://goproxy.cn/${url#https://proxy.golang.org/}\"" ;;
+        https://go.dev/dl/*|https://dl.google.com/go/*)
+          # Go 官方发行版分发（dl.google.com egress 被墙）→ 阿里云 golang 镜像路径同构
+          # （/<file> 一致，文件名全局唯一）；tarball immutable，长缓存见上方 refresh_pattern
+          echo "OK rewrite-url=\"https://mirrors.aliyun.com/golang/${url##*/}\"" ;;
         *://archive.ubuntu.com/*)
           echo "OK rewrite-url=\"${url%%://*}://repo.huaweicloud.com/${url#*archive.ubuntu.com/}\"" ;;
         *://ports.ubuntu.com/*)
           echo "OK rewrite-url=\"${url%%://*}://repo.huaweicloud.com/${url#*ports.ubuntu.com/}\"" ;;
+        https://registry.npmjs.org/*)
+          echo "OK rewrite-url=\"https://registry.npmmirror.com/${url#https://registry.npmjs.org/}\"" ;;
+        https://index.crates.io/*)
+          echo "OK rewrite-url=\"https://rsproxy.cn/index/${url#https://index.crates.io/}\"" ;;
+        https://static.crates.io/crates/*)
+          echo "OK rewrite-url=\"https://rsproxy.cn/crates/${url#https://static.crates.io/crates/}\"" ;;
+        https://conda.anaconda.org/*)
+          echo "OK rewrite-url=\"https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/${url#https://conda.anaconda.org/}\"" ;;
+        https://repo.anaconda.com/pkgs/*|https://repo.anaconda.com/miniconda/*)
+          echo "OK rewrite-url=\"https://mirrors.tuna.tsinghua.edu.cn/anaconda/${url#https://repo.anaconda.com/}\"" ;;
+        *://repo.openeuler.org/*)
+          echo "OK rewrite-url=\"${url%%://*}://mirrors.huaweicloud.com/openeuler/${url#*repo.openeuler.org/}\"" ;;
         *)
           echo "OK" ;;
       esac
