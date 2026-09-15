@@ -80,6 +80,12 @@ spec:
           readOnly: true
         - name: cache
           mountPath: /var/spool/squid
+        {{- if .Values.squid.urlRewrite.enabled }}
+        - name: squid-config
+          mountPath: /etc/squid/rewrite-helper.sh
+          subPath: rewrite-helper.sh
+          readOnly: true
+        {{- end }}
         command:
         - /bin/sh
         - -c
@@ -243,12 +249,24 @@ spec:
           items:
           - key: squid.conf
             path: squid.conf
+          {{- if .Values.squid.urlRewrite.enabled }}
+          - key: rewrite-helper.sh
+            path: rewrite-helper.sh
+          {{- end }}
       - name: squid-ca
         secret:
           secretName: squid-ca
           items:
           - key: squid-ca-bundle.pem
             path: squid-ca-bundle.pem
+      {{- if .Values.squid.urlRewrite.enabled }}
+      - name: rewrite-helper
+        configMap:
+          name: squid-rewrite-helper
+          items:
+          - key: rewrite-helper.sh
+            path: rewrite-helper.sh
+      {{- end }}
       {{- if .Values.registryProxy.enabled }}
       - name: registry-ca
         emptyDir: {}

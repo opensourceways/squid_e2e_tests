@@ -75,6 +75,10 @@ spec:
         - args:
           - |
             set -e
+            # gy-006 适配 2026-09-15：换 modelfoundry/ubuntu:24.04（拉不动 pytorch builder 镜像）
+            # + 现装 git（apt 走 squid → helper 重写 repo.huaweicloud.com）
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq >/dev/null && apt-get install -y -qq git git-lfs >/dev/null
             echo "MODE=$MODE"
             git config --global url."https://gh-proxy.test.osinfra.cn/https://github.com/".insteadOf "https://github.com/" \
               || { echo "WARNING: git config failed for github"; exit 1; }
@@ -122,7 +126,7 @@ spec:
             value: /etc/squid-ca/squid-ca.pem
           - name: CURL_CA_BUNDLE
             value: /etc/squid-ca/squid-ca.pem
-          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+          image: harbor-portal.test.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
           name: git
           resources:
             limits:
@@ -139,6 +143,15 @@ spec:
         - name: huawei-swr-image-pull-secret-model-gy
         nodeSelector:
           kubernetes.io/arch: arm64
+        # gy-006 2026-09-15：节点 172.22.6.177 不信任 harbor-portal.test 域证书，调度规避
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: NotIn
+                  values: ["172.22.6.177"]
         restartPolicy: Never
         securityContext:
           runAsUser: 0
@@ -239,7 +252,7 @@ spec:
             value: /etc/squid-ca/squid-ca.pem
           - name: CURL_CA_BUNDLE
             value: /etc/squid-ca/squid-ca.pem
-          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+          image: harbor-portal.test.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
           name: git
           resources:
             limits:
@@ -256,6 +269,15 @@ spec:
         - name: huawei-swr-image-pull-secret-model-gy
         nodeSelector:
           kubernetes.io/arch: arm64
+        # gy-006 2026-09-15：节点 172.22.6.177 不信任 harbor-portal.test 域证书，调度规避
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: NotIn
+                  values: ["172.22.6.177"]
         restartPolicy: Never
         securityContext:
           runAsUser: 0

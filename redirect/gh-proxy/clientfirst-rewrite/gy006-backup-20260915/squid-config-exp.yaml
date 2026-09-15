@@ -1,9 +1,23 @@
 apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: squid-config
-  namespace: {{ .Values.namespace }}
 data:
+  rewrite-helper.sh: |
+    #!/bin/sh
+    # ── 实验：client-first 下 https 重写（gy-006 2026-09-15，测完即删）──
+    # url_rewrite 协议：读入 "<channel-id> <URL> [附加字段...]"，
+    # 输出 "<channel-id> <重写后URL>"；URL 留空 = 原样放行。
+    # 白名单外一律不重写；http/CONNECT 不进本 helper（bump 后才是 https GET）。
+    while read -r chan url _rest; do
+      case "$url" in
+        https://pypi.org/simple/*)
+          echo "$chan https://pypi.tuna.tsinghua.edu.cn/simple/${url#https://pypi.org/simple/}" ;;
+        https://files.pythonhosted.org/packages/*)
+          echo "$chan https://pypi.tuna.tsinghua.edu.cn/packages/${url#https://files.pythonhosted.org/packages/}" ;;
+        https://proxy.golang.org/*)
+          echo "$chan https://goproxy.cn/${url#https://proxy.golang.org/}" ;;
+        *)
+          echo "$chan" ;;
+      esac
+    done
   squid.conf: |
     # ── 监听端口 + SSL Bump ──
     http_port 3129 ssl-bump \
@@ -28,9 +42,13 @@ data:
     #     origin subject/SAN；客户端信任注入的 CA 即可接受）
     #   - bump 后 GET 是普通代理请求 → 走完整 peer_select → cache_peer 对 https 生效
     # registry 域名白名单：与 .Values.registryProxy.registries 同源，改动只改 values、无需 bump chart
-    {{- range $d := splitList " " .Values.registryProxy.registries }}
-    acl registry dstdomain {{ $d }}
-    {{- end }}
+    acl registry dstdomain swr.cn-north-4.myhuaweicloud.com
+    acl registry dstdomain swr.cn-southwest-2.myhuaweicloud.com
+    acl registry dstdomain swr.cn-north-12.myhuaweicloud.com
+    acl registry dstdomain registry.k8s.io
+    acl registry dstdomain ghcr.io
+    acl registry dstdomain gcr.io
+    acl registry dstdomain quay.io
 
     ssl_bump splice registry
     ssl_bump bump all
@@ -39,6 +57,14 @@ data:
     acl localnet src all
     http_access allow localnet
     http_access deny all
+
+    # ── 实验：client-first https 重写复活（gy-006 2026-09-15，测完即删）──
+    # client-first 无 PINNED 连接，重写后 GET 按新目的地新建 TLS 连接（FwdState needsBump），
+    # server-first 时代重写判死根因（复用 pinned 连接 → 301/421）被消除。
+    # 白名单见 rewrite-helper.sh；registry splice 流量不解密、不进重写（deny 双保险）。
+    url_rewrite_program /bin/sh /etc/squid/rewrite-helper.sh
+    url_rewrite_children 8 startup=1 idle=1
+    url_rewrite_access deny registry
 
     # ── §4.3 registry 缓存 peer（同 Pod 的 rpardini sidecar，localhost:3128）──
     cache_peer 127.0.0.1 parent 3128 0 no-query no-digest name=registryproxy
@@ -53,33 +79,31 @@ data:
     # nginx 不接受 https 绝对形式且 $request_uri 被污染 → 强制 origin-form
     # （GET /simple/... + Host: pypi.org），nginx 按路径正常承接（cachepeer P1 实测 200）。
     # never_direct 硬强制：peer 挂 = fail-closed 快速失败（client-first 下语义可控，P6 可验）。
-    {{- if .Values.squid.cachePeer.enabled }}
     acl CONNECT method CONNECT
-    {{- range $p := .Values.squid.cachePeer.peers }}
-    cache_peer {{ $.Values.squid.cachePeer.host }} parent {{ $p.port }} 0 no-query no-digest originserver name={{ $p.name }}
-    acl {{ $p.name | replace "-" "_" }}_dom dstdomain {{ $p.domains }}
-    cache_peer_access {{ $p.name }} deny CONNECT
-    cache_peer_access {{ $p.name }} allow {{ $p.name | replace "-" "_" }}_dom
-    cache_peer_access {{ $p.name }} deny all
-    never_direct allow {{ $p.name | replace "-" "_" }}_dom !CONNECT
-    {{- end }}
-    {{- end }}
-
-    # ── §4.5 url_rewrite（client-first 下 https 域透明重写，chart 0.1.15 转正）──
-    # helper 见 squid-rewrite-helper CM（values squid.urlRewrite）。重写发生在 peer_select
-    # 之前：被重写域（pypi/go/apt/github archive）的 cache_peer 永不命中，勿同时配置。
-    # helper 失败语义：全灭 1s 内自动重生、期间原样放行（P5 破坏性实测零 5xx）。
-    {{- if .Values.squid.urlRewrite.enabled }}
-    # /bin/sh 前缀：CM 挂载文件无 exec 位（0644），直接 exec 会失败 → sh 解释执行
-    url_rewrite_program /bin/sh /etc/squid/rewrite-helper.sh
-    url_rewrite_children 8 startup=1 idle=2
-    {{- end }}
+    cache_peer cache-service.nginx-pypi-cache.svc.cluster.local parent 8081 0 no-query no-digest originserver name=apt-peer
+    acl apt_peer_dom dstdomain .archive.ubuntu.com .security.ubuntu.com .ports.ubuntu.com .debian.org
+    cache_peer_access apt-peer deny CONNECT
+    cache_peer_access apt-peer allow apt_peer_dom
+    cache_peer_access apt-peer deny all
+    never_direct allow apt_peer_dom !CONNECT
+    cache_peer cache-service.nginx-pypi-cache.svc.cluster.local parent 8084 0 no-query no-digest originserver name=go-peer
+    acl go_peer_dom dstdomain .proxy.golang.org
+    cache_peer_access go-peer deny CONNECT
+    cache_peer_access go-peer allow go_peer_dom
+    cache_peer_access go-peer deny all
+    never_direct allow go_peer_dom !CONNECT
+    cache_peer cache-service.nginx-pypi-cache.svc.cluster.local parent 8086 0 no-query no-digest originserver name=pypi-peer
+    acl pypi_peer_dom dstdomain .pypi.org .files.pythonhosted.org
+    cache_peer_access pypi-peer deny CONNECT
+    cache_peer_access pypi-peer allow pypi_peer_dom
+    cache_peer_access pypi-peer deny all
+    never_direct allow pypi_peer_dom !CONNECT
 
     # ── 缓存配置 ──
-    cache_mem {{ .Values.squid.cacheMemory }} MB
+    cache_mem 512 MB
     maximum_object_size_in_memory 512 KB
-    cache_dir ufs /var/spool/squid {{ .Values.squid.cacheDiskSize }} 16 8
-    maximum_object_size {{ .Values.squid.maxObjectSize }} MB
+    cache_dir ufs /var/spool/squid 20480 16 8
+    maximum_object_size 8192 MB
 
     # ── 缓存策略 ──
     # Immutable build artifacts: never revalidate, ignore client reloads,
@@ -99,17 +123,8 @@ data:
     refresh_pattern -i codeload\.github\.com/.*/refs/heads/ 0 20% 4320
     refresh_pattern -i codeload\.github\.com/.*/refs/tags/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
     refresh_pattern -i github\.com/.*/releases/download/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
-    # gh-proxy 前缀重写后的确定性 URL（client-first + url_rewrite，chart 0.1.15 转正）：
-    # archive/refs/tags immutable 长缓存；releases 为确定性 URL（gh-proxy 服务端消化 302/签名）。
-    # 键为 gh-proxy URL——url_rewrite 发生在选路/缓存查找前，原 github.com/codeload 规则不再命中
-    # host 与 helper（squid.urlRewrite.ghProxyHost）同源，此处转义 . 后内联
-    refresh_pattern -i {{ .Values.squid.urlRewrite.ghProxyHost | replace "." "\\." }}/https://github\.com/.*/archive/refs/tags/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
-    refresh_pattern -i {{ .Values.squid.urlRewrite.ghProxyHost | replace "." "\\." }}/https://github\.com/.*/releases/download/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
     # 索引/元数据（20% 老化匹配同步频率）
     refresh_pattern -i repo\.huaweicloud\.com/.*/simple/ 0 20% 4320 ignore-private ignore-reload
-    # 纯 rewrite 键漂移配套（redirect/gh-proxy/clientfirst-rewrite）：apt 域经 helper
-    # host-swap 后键=huaweicloud，原 .ubuntu.com 规则不再命中——补同参数规则
-    refresh_pattern -i repo\.huaweicloud\.com/(ubuntu|ubuntu-ports)/ 0 20% 4320 ignore-private
     refresh_pattern -i mirrors\.tuna\.tsinghua\.edu\.cn/.*/simple/ 0 20% 4320 ignore-private ignore-reload
     refresh_pattern -i \.pypi\.org/.* 0 20% 4320 ignore-private
     refresh_pattern -i \.golang\.org/.* 0 20% 4320 ignore-private
@@ -149,49 +164,7 @@ data:
     quick_abort_min -1 KB
     quick_abort_max -1 KB
     quick_abort_pct 95
-
-  # ── url_rewrite helper（与 squid.conf 同 CM：helper 规则与上方 refresh_pattern 键强耦合，
-  #    必须同步滚动；STS 从同一 squid-config volume 以 subPath 再挂 /etc/squid/rewrite-helper.sh）──
-  {{- if .Values.squid.urlRewrite.enabled }}
-  rewrite-helper.sh: |
-    #!/bin/sh
-    # squid url_rewrite helper（client-first bump 下 https 域透明重写，chart 0.1.15 转正）
-    # 机制（详见 redirect/gh-proxy/clientfirst-rewrite/TEST-WORKFLOW.md）：
-    #   client-first bump 在 step1 直接决策不连 origin → bump 后 GET 无 pinned 连接 →
-    #   重写后按新目的地新建 TLS 连接 → server-first 时代 301/421（PINNED 复用）结构性
-    #   缺陷不复现（修订⑥需限定为 server-first 专属）。
-    # 协议（squid 5+，url_rewrite_children 未配 concurrency → 无 channel-ID）：
-    #   输入：<URL> [extras]；输出：OK rewrite-url="新URL"（改写）/ OK（不改写）/ ERR
-    #
-    # 规则边界（对齐 SOURCE-REWRITE-ANALYSIS.md，2026-09-15 定稿）：
-    #   1. 对象域绝不单独重写（混源禁令）：files.pythonhosted / download-r2 / codeload 一律放行
-    #   2. pypi 只重写索引 → tuna/simple/。tuna /simple 页面 href 为相对路径 → pip 解析成
-    #      pypi.org/packages/* 官方对象域 → 放行直连 = 官方索引×官方对象同源，squid 本地缓存照吃
-    #   3. codeload 不重写：官方直连 + squid 长缓存最优（并发 30/30、TCP_HIT 3-4ms 实测；
-    #      gh-proxy 白名单本就拒绝 codeload 形态）
-    #   4. archive / releases/download → gh-proxy 前缀（用户拍板 2026-09-15，取代 codeload
-    #      路径手术）：gh-proxy 直接认两形态（实测 200），服务端吸收 302，请求不打
-    #      github.com:443（绕开限流）；键=gh-proxy URL，配合上方 gh-proxy refresh_pattern
-    #      实现 TCP_HIT。git clone / API / raw 不重写（走 insteadOf 客户端方案）
-    #   5. apt → 华为云 host 交换（SOURCE-REWRITE-ANALYSIS 类型二：相对路径源，索引/对象全由
-    #      客户端从 base 拼相对路径生成，host 交换结构上无混源；apt 校验 InRelease/SHA256SUMS
-    #      兜底；apt-get update 实测 14.3s→1.4s，键漂移由上方 huaweicloud refresh_pattern 补齐）
-    #   6. pytorch 不重写（官方可达 + 默认 bump 已缓存；重写只作废缓存键 + 新增镜像依赖）
-    #   7. 白名单外原样放行（OK）；helper 全灭时 squid 1s 内重生、期间原样放行（P5 实测零失败）
-    while read -r url _rest; do
-      case "$url" in
-        https://pypi.org/simple/*)
-          echo "OK rewrite-url=\"https://pypi.tuna.tsinghua.edu.cn/simple/${url#https://pypi.org/simple/}\"" ;;
-        https://github.com/*/archive/*|https://github.com/*/releases/download/*)
-          echo "OK rewrite-url=\"https://{{ .Values.squid.urlRewrite.ghProxyHost }}/${url}\"" ;;
-        https://proxy.golang.org/*)
-          echo "OK rewrite-url=\"https://goproxy.cn/${url#https://proxy.golang.org/}\"" ;;
-        *://archive.ubuntu.com/*)
-          echo "OK rewrite-url=\"${url%%://*}://repo.huaweicloud.com/${url#*archive.ubuntu.com/}\"" ;;
-        *://ports.ubuntu.com/*)
-          echo "OK rewrite-url=\"${url%%://*}://repo.huaweicloud.com/${url#*ports.ubuntu.com/}\"" ;;
-        *)
-          echo "OK" ;;
-      esac
-    done
-  {{- end }}
+kind: ConfigMap
+metadata:
+  name: squid-config
+  namespace: squid

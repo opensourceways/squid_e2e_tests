@@ -1,0 +1,171 @@
+# client-first + url_rewrite P6 端到端 vcjob（gy-006 实验）
+# 配套：TEST-WORKFLOW.md（本目录）；前置：squid CM 实验配置（rewrite-helper.sh 已生效）
+# 用法：
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml apply -f p6-e2e-vcjob.yaml
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml get pods -n squid -l pipeline/run-id=clientfirst-rewrite-p6 -w
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml logs -n squid <pod>
+# 通过标准：pip download ×2 成功（含 hash 校验）、go mod download ×2 成功；
+#          access.log 见 pypi.tuna / goproxy.cn 的 HIER_DIRECT 与二次 HIT。
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: clientfirst-rewrite-p6-
+  labels:
+    kubernetes.io/arch: amd64
+    pipeline/run-id: clientfirst-rewrite-p6
+  name: clientfirst-rewrite-p6-e2e
+  namespace: squid
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  policies:
+  - action: AbortJob
+    event: PodFailed
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  # ─────────── task 1: pip 端到端（官方源 pypi.org，零客户端改动）───────────
+  - maxRetry: 1
+    minAvailable: 1
+    name: pip-squid
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - |
+            set -e
+            t() { echo "$(( ( $(date +%s%N) - $1 ) / 1000000 ))"; }
+            echo "MODE=$MODE"
+            rm -rf /tmp/pip-p6
+            for i in 1 2; do
+              T0=$(date +%s%N)
+              pip download requests==2.31.0 --no-deps -d /tmp/pip-p6 --quiet 2>&1 | tail -2 || true
+              echo "pip download pass$i(squid+rewrite): $(t $T0) ms"
+            done
+            echo "--- 下载物清单（文件非空即下载成功；hash 校验由 pip 自带）---"
+            ls -l /tmp/pip-p6
+            echo "===== 完成（$MODE）：核对 access.log 的 pypi.tuna HIER_DIRECT 与 HIT ====="
+          command:
+          - /bin/bash
+          - -c
+          env:
+          - name: MODE
+            value: pip-clientfirst-rewrite
+          - name: SSL_CERT_FILE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: PIP_CERT
+            value: /etc/squid-ca/squid-ca.pem
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+          name: pip
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh","-c","set +e; P=/etc/squid-ca/squid-ca.pem; if [ -f \"$P\" ]; then cp \"$P\" /usr/local/share/ca-certificates/squid-ca.crt; update-ca-certificates -f >/dev/null 2>&1; fi; exit 0"]
+          resources:
+            limits: {cpu: '2', memory: 4Gi}
+            requests: {cpu: '1', memory: 2Gi}
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: amd64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert
+  # ─────────── task 2: go 端到端（官方 GOPROXY，零客户端改动）───────────
+  - maxRetry: 1
+    minAvailable: 1
+    name: go-squid
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - |
+            set -e
+            t() { echo "$(( ( $(date +%s%N) - $1 ) / 1000000 ))"; }
+            echo "MODE=$MODE"
+            mkdir -p /tmp/gomod-p6 && cd /tmp/gomod-p6
+            printf 'module tmp.example/p6\n\ngo 1.21\n\nrequire golang.org/x/net v0.17.0\n' > go.mod
+            for i in 1 2; do
+              T0=$(date +%s%N)
+              GOPROXY=https://proxy.golang.org,direct go mod download golang.org/x/net 2>&1 | tail -2 || true
+              echo "go mod download pass$i(squid+rewrite): $(t $T0) ms"
+            done
+            echo "--- GOMODCACHE 内对象（非空即下载成功）---"
+            ls /root/go/pkg/mod/cache/download/golang.org/x/net/@v/ 2>/dev/null || true
+            echo "===== 完成（$MODE）：核对 access.log 的 goproxy.cn HIER_DIRECT ====="
+          command:
+          - /bin/bash
+          - -c
+          env:
+          - name: MODE
+            value: go-clientfirst-rewrite
+          - name: SSL_CERT_FILE
+            value: /etc/squid-ca/squid-ca.pem
+          - name: HTTP_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: HTTPS_PROXY
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: http_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: https_proxy
+            value: http://squid-cache.squid.svc.cluster.local:3128
+          - name: NO_PROXY
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          - name: no_proxy
+            value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+          image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+          name: go
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh","-c","set +e; P=/etc/squid-ca/squid-ca.pem; if [ -f \"$P\" ]; then cp \"$P\" /usr/local/share/ca-certificates/squid-ca.crt; update-ca-certificates -f >/dev/null 2>&1; fi; exit 0"]
+          resources:
+            limits: {cpu: '2', memory: 4Gi}
+            requests: {cpu: '1', memory: 2Gi}
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: amd64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert

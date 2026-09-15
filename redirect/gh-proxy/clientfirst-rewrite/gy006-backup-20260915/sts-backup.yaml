@@ -1,0 +1,344 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  annotations:
+    meta.helm.sh/release-name: squid
+    meta.helm.sh/release-namespace: squid
+  creationTimestamp: "2026-08-11T07:44:09Z"
+  generation: 45
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  name: squid-cache
+  namespace: squid
+  resourceVersion: "1227682577"
+  uid: c40143bf-05cb-46e7-acb7-2dc267c3e24a
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 2
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: squid-cache
+  serviceName: squid-cache-headless
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/restartedAt: "2026-09-15T14:07:29+08:00"
+      creationTimestamp: null
+      labels:
+        app: squid-cache
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: squid-cache
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      containers:
+      - command:
+        - /bin/sh
+        - -c
+        - |
+          # 自建镜像（基于 squid-cache/squid 构建，squid 装到 /usr/local/squid，squid 用户 uid/gid=31）
+          # 镜像已内置 squid 及依赖，无需 apk 安装；注意不是官方 squid-cache/squid 镜像。
+          # squid 二进制编译默认 cache_log=/var/logs/cache.log（该目录不存在），
+          # 必须显式指定到 /var/log/squid 并先建目录，否则 squid -z / squid 启动会失败。
+          mkdir -p /var/log/squid
+          if [ -f /etc/squid/ssl_cert/squid-ca-bundle.pem ]; then
+            if [ ! -d /var/cache/squid-ssl-db ]; then
+              /usr/local/squid/libexec/security_file_certgen \
+                -c -s /var/cache/squid-ssl-db -M 8MB
+              chown -R squid:squid /var/cache/squid-ssl-db 2>/dev/null || true
+            fi
+          fi
+
+          MISSING=0
+          for i in 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F; do
+            [ -d /var/spool/squid/$i ] || MISSING=1
+          done
+          if [ "$MISSING" = "1" ]; then
+            printf 'cache_dir ufs /var/spool/squid 20480 16 8\npid_filename /tmp/squid-init.pid\ncache_log /var/log/squid/cache.log\n' > /tmp/squid-init.conf
+            squid -z -f /tmp/squid-init.conf 2>&1 || true
+            rm -f /tmp/squid-init.pid 2>/dev/null || true
+          fi
+
+          rm -f /run/squid.pid /var/run/squid.pid /var/run/squid/squid.pid 2>/dev/null || true
+
+          tail -F /var/log/squid/access.log &
+          tail -F /var/log/squid/cache.log >&2 &
+
+          exec squid -NYC
+        image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/squid-cache/squid:v7.7.1
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /squid-internal-mgr/info
+            port: 3129
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: squid
+        ports:
+        - containerPort: 3129
+          name: proxy
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 2
+          httpGet:
+            path: /squid-internal-mgr/info
+            port: 3129
+            scheme: HTTP
+          initialDelaySeconds: 20
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: "2"
+            memory: 4Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /etc/squid/squid.conf
+          name: squid-config
+          subPath: squid.conf
+        - mountPath: /etc/squid/ssl_cert
+          name: squid-ca
+          readOnly: true
+        - mountPath: /var/spool/squid
+          name: cache
+      - env:
+        - name: SQUID_HOSTNAME
+          value: 127.0.0.1
+        - name: SQUID_PORT
+          value: "3129"
+        - name: SQUID_EXPORTER_LISTEN
+          value: :9301
+        image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/boynux/squid-exporter:v1.13.0
+        imagePullPolicy: IfNotPresent
+        name: squid-exporter
+        ports:
+        - containerPort: 9301
+          name: metrics
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      - env:
+        - name: REGISTRIES
+          value: swr.cn-north-4.myhuaweicloud.com swr.cn-southwest-2.myhuaweicloud.com
+            swr.cn-north-12.myhuaweicloud.com registry.k8s.io ghcr.io gcr.io quay.io
+        - name: ENABLE_MANIFEST_CACHE
+          value: "false"
+        - name: DISABLE_IPV6
+          value: "true"
+        - name: CACHE_MAX_SIZE
+          value: 100g
+        - name: ALLOW_PUSH
+          value: "true"
+        - name: PROXY_READ_TIMEOUT
+          value: 300s
+        - name: PROXY_SEND_TIMEOUT
+          value: 300s
+        - name: PROXY_CONNECT_READ_TIMEOUT
+          value: 300s
+        - name: SEND_TIMEOUT
+          value: 300s
+        image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/rpardini/docker-registry-proxy:0.6.5
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /
+            port: 3128
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: registry-proxy
+        ports:
+        - containerPort: 3128
+          name: registry
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 2
+          httpGet:
+            path: /
+            port: 3128
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: "8"
+            memory: 16Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /ca
+          name: registry-ca
+        - mountPath: /docker_mirror_cache
+          name: registry-cache
+        - mountPath: /var/log/nginx
+          name: nginx-access-log
+      - command:
+        - /bin/sh
+        - /script/exporter.sh
+        env:
+        - name: REGISTRY_CACHE_MAX
+          value: 100g
+        - name: REGISTRY_EXPORTER_INTERVAL
+          value: "30"
+        - name: REGISTRY_EXPORTER_MAX_LOG_LINES
+          value: "100000"
+        image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine:3.23.3
+        imagePullPolicy: IfNotPresent
+        name: registry-exporter
+        ports:
+        - containerPort: 9302
+          name: regmetrics
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 100m
+            memory: 64Mi
+          requests:
+            cpu: 10m
+            memory: 16Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /script
+          name: registry-exporter-script
+          readOnly: true
+        - mountPath: /docker_mirror_cache
+          name: registry-cache
+          readOnly: true
+        - mountPath: /var/log/nginx
+          name: nginx-access-log
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - /bin/sh
+        - -c
+        - |
+          MIRROR=https://mirrors.huaweicloud.com/alpine/v3.23
+          cat > /etc/apk/repositories <<EOF
+          $MIRROR/main
+          $MIRROR/community
+          EOF
+          apk add --no-cache openssl
+          openssl x509 -in /src/squid-ca-bundle.pem -out /ca/ca.crt
+          openssl pkey -in /src/squid-ca-bundle.pem -out /ca/ca.key
+          echo "CA split done:" && ls -l /ca
+        image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine:3.23.3
+        imagePullPolicy: IfNotPresent
+        name: ca-split
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /src
+          name: squid-ca
+          readOnly: true
+        - mountPath: /ca
+          name: registry-ca
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - configMap:
+          defaultMode: 420
+          items:
+          - key: squid.conf
+            path: squid.conf
+          name: squid-config
+        name: squid-config
+      - name: squid-ca
+        secret:
+          defaultMode: 420
+          items:
+          - key: squid-ca-bundle.pem
+            path: squid-ca-bundle.pem
+          secretName: squid-ca
+      - emptyDir: {}
+        name: registry-ca
+      - configMap:
+          defaultMode: 420
+          name: registry-exporter-script
+        name: registry-exporter-script
+      - emptyDir:
+          sizeLimit: 128Mi
+        name: nginx-access-log
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      creationTimestamp: null
+      name: cache
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 50Gi
+      storageClassName: sfsturbo-subpath-sc
+      volumeMode: Filesystem
+    status:
+      phase: Pending
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      creationTimestamp: null
+      name: registry-cache
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 200Gi
+      storageClassName: sfsturbo-subpath-sc
+      volumeMode: Filesystem
+    status:
+      phase: Pending
+status:
+  availableReplicas: 2
+  collisionCount: 0
+  currentReplicas: 2
+  currentRevision: squid-cache-96bcd4ff7
+  observedGeneration: 45
+  readyReplicas: 2
+  replicas: 2
+  updateRevision: squid-cache-96bcd4ff7
+  updatedReplicas: 2

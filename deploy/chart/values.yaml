@@ -74,6 +74,13 @@ squid:
     # - name: go-peer
     #   port: 8084
     #   domains: ".proxy.golang.org"
+  # url_rewrite 透明重写（chart 0.1.15 转正，详见 redirect/gh-proxy/clientfirst-rewrite/TEST-WORKFLOW.md）
+  # client-first bump 下 https 重写复活（无 PINNED，修订⑥需限定 server-first）；helper 由
+  # squid-rewrite-helper CM 提供。被重写域的 cache_peer 永不命中，勿与 cachePeer 同域配置。
+  urlRewrite:
+    enabled: false
+    # github archive/releases 重写目标（gh-proxy 前缀），configmap.yaml 的 refresh_pattern 同源
+    ghProxyHost: gh-proxy.test.osinfra.cn
 
 exporter:
   enabled: true

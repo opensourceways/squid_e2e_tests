@@ -178,7 +178,7 @@ spec:
             value: /etc/squid-ca/squid-ca.pem
           - name: CURL_CA_BUNDLE
             value: /etc/squid-ca/squid-ca.pem
-          image: harbor-portal.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
+          image: harbor-portal.test.osinfra.cn/north4-myhuaweicloud/frameworkptadapter/pytorch_2.11.0_a2_aarch64_builder:20260518
           name: git
           resources:
             limits:

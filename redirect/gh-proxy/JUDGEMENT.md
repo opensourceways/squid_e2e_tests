@@ -48,8 +48,25 @@
 > ssl-bump 下结构性不可用（无论是否 pin DNS）**；可行路径 = **客户端 insteadOf 换源**（URL 直接
 > 写 gh-proxy 前缀，如 02 用例 task3，验证全通）。首选从"统一重写"回到"客户端 insteadOf +
 > squid 本地缓存"。详见 3.2/3.3 与 SOLUTION.md。
-
----
+>
+> **2026-09-15 修订⑦（根因再推翻修订⑥的"普适判死"——client-first bump 化解 PINNED，
+> https url_rewrite 复活，架构收纯 rewrite 定案）**：
+> 修订⑥的"helper 重写 https 结构性不可用"只对 **server-first bump**（peek→bump，CONNECT 阶段
+> 先连 origin 仿冒证书）成立——那条链的 origin 连接被 **PINNED** 到后续请求，bump 解密后重写
+> 仍复用原连接 → 301 翻倍/421。**client-first（方案A，chart 0.1.14 起）在 ssl_bump step1 直接
+> 决策 splice/bump、不连 origin** → bump 后的 GET 无 pinned 连接，url_rewrite 重写后按新目的地
+> **新建 TLS 连接** → 修订⑥的 301 翻倍/421 结构性缺陷**不复现**（修订⑥结论需限定为
+> server-first 专属）。**实测（gy-006，2026-09-15，redirect/test/ 8 用例全绿 + P6 e2e）**：
+> pypi index→tuna 200、github archive/releases→gh-proxy 200、proxy.golang.org→goproxy.cn 200、
+> apt→huaweicloud 200（01/02/03/03b/04/P6）；helper 全灭破坏性实测（P5）1s 内自动重生、
+> 期间原样放行零 5xx。**2026-09-15 用户拍板"架构收纯 rewrite"（chart 0.1.15 转正）**：
+> values-006 摘除全部 cache_peer（go/pypi/apt，registryproxy sidecar 保留），helper 与
+> refresh_pattern 合并进 squid-config CM 同步滚动（`/bin/sh` 前缀绕 CM 0644 无 exec 位）。
+> 规则边界（混源禁令，对齐 SOURCE-REWRITE-ANALYSIS.md）：对象域绝不单独重写——pypi 只重写
+> /simple/（tuna 相对路径 href → pip 仍回 pypi.org/packages，官方索引×官方对象同源）、
+> codeload 不重写（官方直连+squid 长缓存 TCP_HIT 最优）、archive/releases→gh-proxy 前缀
+> （gh-proxy 服务端消化 302，请求不打 github.com:443 绕开限流）、git clone/API/raw 不重写
+> （走 insteadOf）。详见 `redirect/gh-proxy/clientfirst-rewrite/TEST-WORKFLOW.md`。
 
 ## 一、一句话判断
 
@@ -61,9 +78,13 @@ CONNECT 阶段按原域名（github.com → `.166`，正常解析）建连，bum
 域重写全部中招（pypi→tuna 421）；仅 http 明文重写可用**（无 CONNECT，重写在建连前，archive/ports
 →huaweicloud 200）。
 正确用法（修订⑥，首选）：**客户端 insteadOf 直连 gh-proxy（URL 写 gh-proxy 前缀）+ squid 本地缓存**。
+> ⚠️ **修订⑦（2026-09-15）**：上文"结构性不可用"判定仅限 **server-first bump**；生产已切
+> **client-first**（无 PINNED），https url_rewrite 复活并转正——archive/releases→gh-proxy
+> 前缀重写 8 用例全绿（chart 0.1.15 纯 rewrite 架构），详见文末修订⑦。
 
 核心对比：**给客户端用（insteadOf 直连）✅（7/7 + 20/20 样本观测 + P6/02-task3 全链路）/ 给 Squid
-helper 重写 https 用 ❌（ssl-bump 连接复用，结构性不可用，修订⑥定论）**。
+helper 重写 https 用 ❌（ssl-bump 连接复用，结构性不可用，修订⑥定论→修订⑦限定为 server-first
+专属；client-first 下 ✅ 已实测转正）**。
 
 ---
 
@@ -103,7 +124,8 @@ gh-proxy 把境外抓取放在**服务端 + 内网出口**，客户端只和内�
 ### 3.2 ❌ 经 Squid url_rewrite 重写进 gh-proxy —— 结构性不可用（修订⑥定论）
 
 > 本节记录的是 **https 重写**的表现。根因已定论（修订⑥）：ssl-bump CONNECT + url_rewrite 连接复用，
-> 与 DNS 无关，**pin DNS 无效**。
+> 与 DNS 无关，**pin DNS 无效**。**修订⑦限定**：以下结论仅对 **server-first bump** 成立；
+> client-first（生产现行）无 PINNED 连接，https 重写已实测可用并转正（chart 0.1.15）。
 
 | 实测项 | 结果 |
 |---|---|
@@ -240,6 +262,8 @@ git 的 `/info/refs` GET + `/git-upload-pack` POST 经 gh-proxy 均正常 → **
 2. **helper 重写 https 域结构性不可用**（ssl-bump 连接复用，修订⑥定论）：github→gh-proxy
    （301 翻倍）、pypi→tuna（421）、archive/ports/openeuler 的 https 形态——一律不依赖 helper
    重写 https，mirror-rewrite.sh 的 https 分支应停用。
+   **修订⑦推翻此项**：client-first bump 下 PINNED 消失，https 重写复活并转正（0.1.15 纯
+   rewrite 架构）；本条仅适用于 server-first bump 集群。
 3. **helper http 明文重写可用**：`http://archive.ubuntu.com` / `http://ports.ubuntu.com` /
    `http://repo.openeuler.org` → 华为云实测 200（无 CONNECT，重写在建连前）。
 4. **archive→codeload 1:1（原备选）的 https 重写形态同样不可用**（github.com CONNECT 已定死
@@ -281,6 +305,7 @@ git 的 `/info/refs` GET + `/git-upload-pack` POST 经 gh-proxy 均正常 → **
 | 20 | **根因定论（修订⑥）**：https github.com→gh-proxy 301 翻倍 = ssl-bump 连接复用——CONNECT github.com:443→.166（**正常解析**）建连，helper 重写后 squid 复用 `.166` 连接、不按新 host 重建；请求以 gh-proxy 的 Host 打到 GitHub 边缘 → 畸形 301 翻倍；**pin DNS（固定 .254）后仍复现** | squid-cache-0 pod 内 curl -x 127.0.0.1:3129 + access.log（2026-09-08）|
 | 21 | **普适性**：https pypi→tuna 重写同样失败——CONNECT pypi.org:443→151.101.0.223，重写后仍发 `.223` → **421**；证明所有 https 域重写在 ssl-bump 下均结构性失败 | squid-cache-0 pod 内实测（2026-09-08）|
 | 22 | **分界点**：http 明文重写正常——`http://archive.ubuntu.com/dists/jammy/Release` → huaweicloud **200**（无 CONNECT，重写发生在建连前，squid 按新 host 重新解析建连）| squid-cache-0 pod 内实测（2026-09-08）|
+| 23 | **client-first 下 https 重写复活（修订⑦）**：pypi index→tuna 200、archive/releases→gh-proxy 200、proxy.golang.org→goproxy.cn 200、apt→huaweicloud 200（redirect/test/ 01/02/03/03b/04 + P6 e2e 8 用例全绿）；helper 全灭 P5 破坏性实测 1s 自愈、原样放行零 5xx；chart 0.1.15 部署 gy-006 2/2 Ready 全链路回归通过 | `redirect/gh-proxy/clientfirst-rewrite/TEST-WORKFLOW.md` + `redirect/test/`（gy-006，2026-09-15）|
 
 ---
 
@@ -303,3 +328,6 @@ git 的 `/info/refs` GET + `/git-upload-pack` POST 经 gh-proxy 均正常 → **
    gy-001 4.5 天生产日志——archive 59%（最高频 GET）、git clone ~31%、releases 6%、raw 0
 9. ~~统一重写 github.com → gh-proxy + pin DNS 是否可用~~ —— **已解决（修订⑥）**：结构性
    不可用（ssl-bump 连接复用，pin DNS 无效）；首选改为**客户端 insteadOf 换源**
+10. ~~https url_rewrite 在生产 bump 形态下是否可用~~ —— **已解决（修订⑦，推翻修订⑥的
+   server-first 判死的普适性）**：client-first bump 无 PINNED 连接，https 重写复活；
+   2026-09-15 架构收纯 rewrite 定案（chart 0.1.15，gy-006 8 用例全绿转正）

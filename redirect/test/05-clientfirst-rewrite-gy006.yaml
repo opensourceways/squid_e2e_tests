@@ -1,0 +1,109 @@
+# client-first + url_rewrite 端到端验证 Job（gy-006，2026-09-15）
+#
+# 前置：squid CM 含 rewrite-helper.sh（规则对齐 SOURCE-REWRITE-ANALYSIS.md，
+#       见 redirect/gh-proxy/clientfirst-rewrite/gy006-backup-20260915/）：
+#   ① pypi.org/simple → tuna/simple（index-only，对象域放行官方 = 同源）
+#   ② github.com archive/releases → gh-proxy 前缀（服务端消化 302/签名 URL）
+#   ③ proxy.golang.org → goproxy.cn（绕开 Google egress 阻断）
+#   ④ codeload / files.pythonhosted / download-r2 / pytorch 一律不重写（混源禁令）
+# 配套 refresh_pattern：gh-proxy archive/tags 与 releases 的确定性 URL 长缓存（chart 0.1.15）。
+#
+# 覆盖场景（各 MISS→HIT 两发，验证重写 + 本地缓存闭环）：
+#   A. github archive（github.com/.../archive/...）→ gh-proxy，TCP_HIT
+#   B. github releases（签名 URL 域）→ gh-proxy，TCP_HIT
+#   C. pypi 索引 → tuna /simple；wheel 对象 → pypi.org/packages 官方域放行（仍被 bump 缓存）
+#   D. go 模块 → goproxy.cn
+#   E. pytorch 不重写：索引 + download-r2 wheel 官方直取（bump 本地缓存 MISS→HIT）
+#
+# 使用：
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml apply -f 05-clientfirst-rewrite-gy006.yaml
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml logs -n squid job/clientfirst-rewrite-e2e -f
+# 通过标准：所有 probe HTTP 200；第二发耗时 ≪ 第一发（TCP_HIT）；access.log 见
+#           gh-proxy/goproxy.cn HIER_DIRECT + 二发 HIER_NONE。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clientfirst-rewrite-e2e
+  namespace: squid
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      labels:
+        app: clientfirst-rewrite-e2e
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      restartPolicy: Never
+      volumes:
+      - name: squid-ca
+        secret:
+          secretName: squid-ca-cert
+          items:
+          - key: squid-ca.pem
+            path: squid-ca.pem
+          optional: true
+      containers:
+      - name: probe
+        image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/squid-cache/squid:v7.7.1
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: squid-ca
+          mountPath: /etc/squid-ca
+          readOnly: true
+        env:
+        - name: HTTP_PROXY
+          value: http://squid-cache.squid.svc.cluster.local:3128
+        - name: HTTPS_PROXY
+          value: http://squid-cache.squid.svc.cluster.local:3128
+        - name: http_proxy
+          value: http://squid-cache.squid.svc.cluster.local:3128
+        - name: https_proxy
+          value: http://squid-cache.squid.svc.cluster.local:3128
+        - name: NO_PROXY
+          value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+        - name: no_proxy
+          value: localhost,127.0.0.1,.svc.cluster.local,.cluster.local
+        - name: SSL_CERT_FILE
+          value: /etc/squid-ca/squid-ca.pem
+        - name: CURL_CA_BUNDLE
+          value: /etc/squid-ca/squid-ca.pem
+        command: ["/bin/sh","-c"]
+        args:
+        - |
+          P="$HTTPS_PROXY"
+          CA="$SSL_CERT_FILE"
+          echo "node=$HOSTNAME date=$(date -u +%FT%TZ) proxy=$P"
+          probe() {  # probe <tag> <url> [max-time]
+            tag="$1"; url="$2"; mt="${3:-120}"
+            curl -sS --cacert "$CA" -x "$P" -o /dev/null \
+              -w "$tag: HTTP %{http_code} | %{size_download}B | %{time_total}s\n" \
+              --max-time "$mt" "$url" || echo "$tag: FAILED"
+          }
+          echo "===== A. github archive → gh-proxy ====="
+          ARCH="https://github.com/pybind/pybind11/archive/refs/tags/v2.13.6.tar.gz"
+          probe "A-miss" "$ARCH"
+          probe "A-hit " "$ARCH"
+          echo "===== B. github releases → gh-proxy ====="
+          REL="https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine-v1.18.0-x86_64-unknown-linux-gnu.tar.gz"
+          probe "B-miss" "$REL"
+          probe "B-hit " "$REL"
+          echo "===== C. pypi：索引→tuna /simple；对象→官方域放行 ====="
+          probe "C-idx1" "https://pypi.org/simple/requests/"
+          probe "C-idx2" "https://pypi.org/simple/requests/"
+          # 从 tuna 索引解析出的对象 URL 是官方域形态（pip 视角 pypi.org/packages/...）
+          probe "C-obj1" "https://pypi.org/packages/source/r/requests/requests-2.31.0.tar.gz"
+          probe "C-obj2" "https://pypi.org/packages/source/r/requests/requests-2.31.0.tar.gz"
+          echo "===== D. go → goproxy.cn ====="
+          probe "D-mod1" "https://proxy.golang.org/golang.org/x/net/@v/v0.17.0.mod"
+          probe "D-mod2" "https://proxy.golang.org/golang.org/x/net/@v/v0.17.0.mod"
+          probe "D-zip " "https://proxy.golang.org/golang.org/x/net/@v/v0.17.0.zip"
+          echo "===== E. pytorch 不重写（bump 本地缓存） ====="
+          probe "E-idx1" "https://download.pytorch.org/whl/cpu/torchvision/"
+          probe "E-idx2" "https://download.pytorch.org/whl/cpu/torchvision/"
+          probe "E-obj1" "https://download-r2.pytorch.org/whl/cpu/torchvision-0.21.0+cpu-cp310-cp310-linux_x86_64.whl" 300
+          probe "E-obj2" "https://download-r2.pytorch.org/whl/cpu/torchvision-0.21.0+cpu-cp310-cp310-linux_x86_64.whl" 300
+          echo "===== 白名单外不误伤 ====="
+          probe "X-api " "https://api.github.com/rate_limit"
+          echo "DONE"
