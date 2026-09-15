@@ -99,7 +99,7 @@ Runner job pods (e.g. `other/nv-action/vllm-benchmarks/config-for-guiyang-006/li
 
 ```yaml
 HTTP_PROXY / HTTPS_PROXY / http_proxy / https_proxy = http://squid-cache.squid.svc.cluster.local:3128
-NO_PROXY   / no_proxy  = localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local
+NO_PROXY   / no_proxy  = 0.0.0.0,localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local
 ```
 
 Because squid SSL-bumps HTTPS, the pod must trust the squid CA:

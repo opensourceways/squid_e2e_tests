@@ -1,0 +1,751 @@
+apiVersion: v1
+data:
+  cratescache.conf: |
+    proxy_cache_path /var/lib/nginx/crates levels=1:2 keys_zone=crates:16m inactive=1M max_size=200G use_temp_path=off;
+
+    # mirrors.ustc.edu.cn mirrors crates.io: sparse index at /crates.io-index/ and
+    # crate archives at /crates.io/api/v1/crates/ (served directly, no redirect).
+    upstream crates_mirror {
+        server mirrors.ustc.edu.cn:443;
+        server mirrors.ustc.edu.cn:443;
+    }
+
+    server {
+        listen 8085 reuseport;
+
+        access_log /dev/stdout cachelog;
+        error_log /dev/stderr;
+
+        proxy_cache crates;
+        proxy_ignore_headers Expires Cache-Control Set-Cookie;
+        proxy_hide_header Set-Cookie;
+        proxy_cache_lock on;
+        proxy_cache_lock_age 5m;
+        proxy_cache_lock_timeout 5m;
+        proxy_cache_revalidate on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_ssl_server_name on;
+        proxy_ssl_verify off;
+        proxy_ssl_protocols TLSv1.2;
+
+        add_header X-Crates-Cache $upstream_cache_status;
+
+        proxy_set_header Host mirrors.ustc.edu.cn;
+        proxy_ssl_name mirrors.ustc.edu.cn;
+        # Disable upstream compression so sub_filter can rewrite the dl URL.
+        proxy_set_header Accept-Encoding "";
+
+        # Sparse index config.json: rewrite dl so cargo fetches crates through this
+        # cache instead of mirrors.ustc.edu.cn (which build containers cannot reach).
+        location = /index/config.json {
+            proxy_cache_valid 200 10m;
+            proxy_cache_valid 404 1m;
+            proxy_pass https://crates_mirror/crates.io-index/config.json;
+            sub_filter 'https://mirrors.ustc.edu.cn/crates.io/api/v1/crates' 'http://cache-service.nginx-pypi-cache.svc.cluster.local:8085/api/v1/crates';
+            sub_filter_once on;
+            sub_filter_types application/json;
+        }
+
+        # Sparse index entries: versioned metadata, refreshed on release.
+        location /index/ {
+            proxy_cache_valid 200 10m;
+            proxy_cache_valid 404 1m;
+            proxy_pass https://crates_mirror/crates.io-index/;
+        }
+
+        # Crate archives (immutable, long TTL).
+        location /api/v1/crates/ {
+            proxy_cache_valid 200 1y;
+            proxy_cache_valid 404 1m;
+            proxy_buffers 8 1M;
+            proxy_buffer_size 1M;
+            proxy_connect_timeout 60s;
+            proxy_read_timeout 600s;
+            proxy_cache_lock_timeout 600s;
+            proxy_cache_lock_age 600s;
+            proxy_pass https://crates_mirror/crates.io/api/v1/crates/;
+        }
+    }
+  debcache.conf: |
+    # Global Cache settings
+
+    # URI paths to avoid cache
+    # These paths will change to indicate new release contents
+    # All other .deb files can be cached nearly indefinitely, as the
+    # version number is coded into the file name.
+    map $request_uri $nocache {
+        ~InRelease 1;
+        ~Release 1;
+        ~Packages 1;
+    }
+
+    upstream deb_mirror {
+        server repo.huaweicloud.com:443;
+        server repo.huaweicloud.com:443;
+    }
+
+    proxy_cache_path /var/lib/nginx/deb levels=1:2 keys_zone=deb:16m inactive=1M max_size=500G use_temp_path=off;
+    # Deb Server
+    server {
+        # IF you need legacy IP, enable this one
+        listen 8081 reuseport;
+
+        # Everyone needs modern IP
+        #listen [::]:8081 reuseport;
+
+        #Log settings
+        access_log /dev/stdout cachelog;
+        error_log /dev/stderr;
+
+        # Cache Location
+        slice 1m;
+        proxy_cache deb;
+        proxy_ignore_headers Expires Cache-Control;
+        proxy_cache_valid 200 206 3650d;
+        proxy_cache_valid 301 302 0;
+        proxy_set_header  Range $slice_range;
+        proxy_cache_lock on;
+        proxy_cache_lock_age 5m;
+        proxy_cache_lock_timeout 5m;
+        proxy_cache_revalidate on;
+        proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
+        #Nocache for those entries
+        proxy_cache_bypass $nocache;
+        proxy_no_cache $nocache;
+        # 1G max file
+        proxy_max_temp_file_size 1024m;
+        # Cache key
+        proxy_cache_key      $http_host$uri$slice_range;
+        # Upstream Configuration
+        proxy_next_upstream error timeout http_404;
+        # Cache status
+        add_header X-Cache-Status $upstream_cache_status;
+        proxy_ignore_client_abort on;
+        # Upstream request headers
+        proxy_ssl_server_name on;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        # Redirect Locations
+        # Must include trailing slash!
+        proxy_redirect 'https://repo.huaweicloud.com' $scheme://$http_host;
+        proxy_set_header Host "repo.huaweicloud.com";
+        proxy_ssl_name repo.huaweicloud.com;
+        # Debian
+        location / {
+            proxy_pass https://deb_mirror;
+        }
+    }
+  gocache.conf: |
+    upstream go_mirror {
+        server repo.huaweicloud.com:443;
+        server repo.huaweicloud.com:443;
+    }
+
+    proxy_cache_path /var/lib/nginx/go levels=1:2 keys_zone=go:16m inactive=1M max_size=200G use_temp_path=off;
+
+    server {
+        listen 8084 reuseport;
+
+        access_log /dev/stdout cachelog;
+        error_log /dev/stderr;
+
+        proxy_cache go;
+        proxy_ignore_headers Expires Cache-Control Set-Cookie;
+        proxy_hide_header Set-Cookie;
+        proxy_cache_lock on;
+        proxy_cache_lock_age 5m;
+        proxy_cache_lock_timeout 5m;
+        proxy_cache_revalidate on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_ssl_server_name on;
+
+        add_header X-Go-Cache $upstream_cache_status;
+
+        proxy_set_header Host repo.huaweicloud.com;
+        proxy_ssl_name repo.huaweicloud.com;
+        proxy_ssl_verify off;
+        proxy_ssl_protocols TLSv1.2;
+        proxy_redirect 'https://repo.huaweicloud.com/repository/goproxy' $scheme://$http_host;
+
+        # Module metadata (.mod/.info) - long TTL (immutable, versioned)
+        location ~* \.(mod|info)$ {
+            proxy_cache_valid 200 301 1M;
+            proxy_cache_valid 404 1m;
+
+            proxy_set_header Host repo.huaweicloud.com;
+            proxy_ssl_name repo.huaweicloud.com;
+            proxy_pass https://go_mirror/repository/goproxy$request_uri;
+
+            # Fallback to goproxy.cn when Huawei Cloud hasn't synced yet
+            proxy_intercept_errors on;
+            error_page 404 = @go_fallback;
+        }
+
+        # Module zip files - long TTL (versioned, immutable)
+        location ~* \.zip$ {
+            proxy_cache_valid 200 301 1M;
+            proxy_cache_valid 404 1m;
+
+            proxy_buffers 8 1M;
+            proxy_buffer_size 1M;
+            proxy_connect_timeout 60s;
+            proxy_read_timeout 600s;
+            proxy_cache_lock_timeout 600s;
+            proxy_cache_lock_age 600s;
+
+            proxy_set_header Host repo.huaweicloud.com;
+            proxy_ssl_name repo.huaweicloud.com;
+            proxy_pass https://go_mirror/repository/goproxy$request_uri;
+
+            # Fallback to goproxy.cn when Huawei Cloud hasn't synced yet
+            proxy_intercept_errors on;
+            error_page 404 = @go_fallback;
+        }
+
+        location @go_fallback {
+            proxy_cache_valid 200 301 1M;
+            proxy_cache_valid 404 1m;
+
+            proxy_buffers 8 1M;
+            proxy_buffer_size 1M;
+
+            proxy_set_header Host goproxy.cn;
+            proxy_ssl_name goproxy.cn;
+            proxy_ssl_verify off;
+            proxy_ssl_protocols TLSv1.2;
+            proxy_pass https://goproxy.cn$request_uri;
+        }
+
+        # Version list endpoints (@v/list, @latest) - mutable, short TTL
+        location @go_list_fallback {
+            proxy_cache_valid 200 301 1h;
+            proxy_cache_valid 404 1m;
+
+            proxy_set_header Host goproxy.cn;
+            proxy_ssl_name goproxy.cn;
+            proxy_ssl_verify off;
+            proxy_ssl_protocols TLSv1.2;
+            proxy_pass https://goproxy.cn$request_uri;
+        }
+
+        location / {
+            proxy_cache_valid 200 301 1h;
+            proxy_cache_valid 404 1m;
+
+            proxy_set_header Host repo.huaweicloud.com;
+            proxy_ssl_name repo.huaweicloud.com;
+            proxy_pass https://go_mirror/repository/goproxy$request_uri;
+
+            # Fallback to goproxy.cn for version list queries
+            proxy_intercept_errors on;
+            error_page 404 = @go_list_fallback;
+        }
+    }
+  nginx.conf: |
+    # Loosely based on the following:
+    # (note these do not work correctly in 2023)
+    # https://joelkleier.com/blog/2018-04-17-pypi-temporary-cache.html
+    # https://gist.github.com/dctrwatson/5785638#file-nginx-conf
+    # It's also very easy to end up not proxying requests; tests/mitmtest.sh should help verify that
+    # pip installs actually avoid hitting upstream
+
+    error_log /dev/stderr;
+    # Log to file, can be useful for dev
+    # error_log /var/log/nginx/error.log;
+    pid /var/run/nginx.pid;
+
+    worker_processes 16;
+    worker_rlimit_nofile 65535;
+
+    events {
+        worker_connections 2048;
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+        sendfile on;
+        tcp_nodelay on;
+        tcp_nopush off;
+        reset_timedout_connection on;
+        server_tokens off;
+        gzip on;
+        gzip_types application/vnd.pypi.simple.v1+json;
+        gzip_proxied any;
+        gzip_vary on;
+
+        log_format cachelog '$remote_addr - $http_host [$time_local] '
+                            'request_time=$request_time upstream_time=$upstream_response_time '
+                            'cache_key="$uri/$http_accept_encoding" '
+                            'cache_status=$upstream_cache_status '
+                            'upstream_bytes=$upstream_bytes_received \t'
+                            '$status $proxy_host "$request" $body_bytes_sent';
+        access_log /dev/stdout cachelog buffer=64k flush=1s;
+        # Log to file, can be useful for dev
+        # access_log /var/log/nginx/cache.log pypi_cache buffer=64k flush=1s;
+
+        # Cache 500G worth of packages for up to 1 month
+        proxy_cache_path /var/lib/nginx/pypi levels=1:2 keys_zone=pypi:16m inactive=1M max_size=500G use_temp_path=off;
+
+        # mirrors.huaweicloud.com syncs faster than repo and doesn't have the
+        # 12 h CDN cache issue. Defined as an upstream so nginx resolves the
+        # hostname at startup (no runtime resolver directive needed).
+        upstream mirrors_simple {
+            server mirrors.huaweicloud.com:443;
+            server mirrors.huaweicloud.com:443;
+        }
+
+        # Having the same upstream server listed twice allegedly forces nginx to retry
+        # connections and not fail the request immediately.
+
+        server {
+            listen 80 default_server;
+
+            proxy_cache pypi;
+            proxy_cache_key $uri/$http_accept_encoding;
+            proxy_cache_lock on;
+            proxy_cache_lock_age 5m;
+            proxy_cache_lock_timeout 5m;
+            proxy_cache_revalidate on;
+            proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+
+            proxy_http_version 1.1;
+            proxy_ssl_server_name on;
+
+            # sub_filter can't apply to gzipped content, so be careful about that
+            add_header X-Pypi-Cache $upstream_cache_status;
+            sub_filter 'https://repo.huaweicloud.com' $scheme://$http_host;
+            sub_filter 'https://repo.huaweicloud.com/repository/pypi/packages' $scheme://$http_host/pypi/packages;
+            # When falling back to upstream pypi.org, its simple index links to files.pythonhosted.org;
+            # rewrite so package downloads come back through this cache (and pick up the /pypi/packages fallback)
+            sub_filter 'https://files.pythonhosted.org' $scheme://$http_host/pypi;
+            # Rewrite PyTorch links to stay within this cache.
+            # The index HTML served by download.pytorch.org lists wheel files
+            # with absolute URLs pointing to the R2 CDN (download-r2.pytorch.org),
+            # so both hostnames must be rewritten or pip will bypass this cache.
+            sub_filter 'https://download.pytorch.org'    $scheme://$http_host;
+            sub_filter 'https://download-r2.pytorch.org' $scheme://$http_host;
+
+            sub_filter_once off;
+            sub_filter_types application/vnd.pypi.simple.v1+json application/vnd.pypi.simple.v1+html text/html;
+
+            location / {
+                proxy_set_header Connection "";
+                proxy_set_header Accept-Encoding "";
+                proxy_cache_valid 200 301 4h;
+                proxy_cache_valid 404 1m;
+
+                proxy_set_header Host repo.huaweicloud.com;
+                proxy_ssl_name repo.huaweicloud.com;
+                proxy_ssl_verify  off;
+                proxy_ssl_protocols TLSv1.2;
+                proxy_pass 'https://repo.huaweicloud.com/repository/';
+                proxy_redirect 'https://repo.huaweicloud.com' $scheme://$http_host;
+            }
+
+            location ^~ /pypi/simple {
+                proxy_set_header Connection "";
+                proxy_set_header Accept-Encoding "";
+                proxy_cache_valid 200 301 10m;
+
+                # Use mirrors_simple upstream (mirrors.huaweicloud.com) instead of
+                # repo.huaweicloud.com: repo's CDN caches the simple index up to
+                # 12 h and returns HTTP 200 with stale content, so the 404 fallback
+                # never fires. mirrors syncs faster and returns relative package
+                # URLs so the server-level sub_filter rules need no changes.
+                proxy_set_header Host mirrors.huaweicloud.com;
+                proxy_ssl_name mirrors.huaweicloud.com;
+                proxy_ssl_verify  off;
+                proxy_ssl_protocols TLSv1.2;
+                proxy_pass 'https://mirrors_simple/repository$request_uri';
+                proxy_redirect 'https://mirrors.huaweicloud.com' $scheme://$http_host;
+
+                # Fall back to pypi.org on 404 (package not yet synced to mirrors)
+                proxy_intercept_errors on;
+                error_page 404 = @pypi_simple_fallback;
+            }
+
+            location @pypi_simple_fallback {
+                proxy_set_header Connection "";
+                proxy_set_header Accept-Encoding "";
+                proxy_cache_valid 200 301 10m;
+
+                # Strip /pypi prefix so pypi.org sees /simple/<pkg>/
+                rewrite ^/pypi/(.*)$ /$1 break;
+
+                proxy_set_header Host pypi.org;
+                proxy_ssl_name pypi.org;
+                proxy_ssl_verify off;
+                proxy_ssl_protocols TLSv1.2;
+                # No variable in proxy_pass — nginx resolves pypi.org once at
+                # startup, so no `resolver` directive is needed.
+                proxy_pass 'https://pypi.org';
+                proxy_redirect 'https://pypi.org' $scheme://$http_host;
+            }
+
+            location ^~ /pypi/packages {
+                proxy_set_header Connection "";
+                proxy_set_header Accept-Encoding "";
+                proxy_cache_valid 200 301 1M;
+
+                proxy_set_header Host repo.huaweicloud.com;
+                proxy_ssl_name repo.huaweicloud.com;
+                proxy_ssl_verify off;
+                proxy_ssl_protocols TLSv1.2;
+                # $request_uri is appended verbatim, so /pypi/packages/foo.whl
+                # becomes repo.huaweicloud.com/repository/pypi/packages/foo.whl
+                proxy_pass 'https://repo.huaweicloud.com/repository$request_uri';
+                proxy_redirect 'https://repo.huaweicloud.com' $scheme://$http_host;
+
+                # Fall back to official pythonhosted CDN when huaweicloud hasn't synced yet
+                proxy_intercept_errors on;
+                error_page 404 = @packages_fallback;
+            }
+
+            location @packages_fallback {
+                proxy_set_header Connection "";
+                proxy_set_header Accept-Encoding "";
+                proxy_cache_valid 200 301 1M;
+
+                # Strip the /pypi prefix we added so the upstream path matches pythonhosted layout
+                rewrite ^/pypi/(.*)$ /$1 break;
+
+                proxy_set_header Host files.pythonhosted.org;
+                proxy_ssl_name files.pythonhosted.org;
+                proxy_ssl_verify off;
+                proxy_ssl_protocols TLSv1.2;
+                proxy_pass 'https://files.pythonhosted.org';
+            }
+
+            location ^~ /packages {
+                proxy_set_header Connection "";
+                proxy_set_header Accept-Encoding "";
+                proxy_cache_valid 200 301 1M;
+                proxy_cache_valid 404 1m;
+
+                proxy_set_header Host repo.huaweicloud.com;
+                proxy_ssl_name repo.huaweicloud.com;
+                proxy_ssl_verify  off;
+                proxy_ssl_protocols TLSv1.2;
+                proxy_pass 'https://repo.huaweicloud.com/repository/';
+                proxy_redirect 'https://repo.huaweicloud.com' $scheme://$http_host;
+            }
+
+            # Ascend custom pypi index on huaweicloud.
+            # Hosts wheels too large for public PyPI's 100 MB limit
+            # (e.g. triton-ascend 3.2.1 is ~180 MB). Path is served verbatim
+            # without the /repository/ prefix the default location adds,
+            # so proxy_pass uses $request_uri directly.
+            # Wheels carry version in the filename — 1-month TTL is safe.
+            location ^~ /ascend/repos {
+                proxy_set_header Connection "";
+                proxy_set_header Accept-Encoding "";
+
+                # Some wheels exceed 180 MB; mirror the /whl timeout/lock
+                # settings used for slow large downloads.
+                proxy_connect_timeout 300s;
+                proxy_read_timeout 1200s;
+                proxy_send_timeout 1200s;
+
+                proxy_cache_valid 200 301 1M;
+                proxy_cache_valid 404 1m;
+
+                proxy_cache_lock on;
+                proxy_cache_lock_timeout 1200s;
+                proxy_cache_lock_age 1200s;
+
+                proxy_buffers 8 1M;
+                proxy_buffer_size 1M;
+
+                proxy_set_header Host repo.huaweicloud.com;
+                proxy_ssl_name repo.huaweicloud.com;
+                proxy_ssl_verify off;
+                proxy_ssl_protocols TLSv1.2;
+                proxy_pass 'https://repo.huaweicloud.com$request_uri';
+                proxy_redirect 'https://repo.huaweicloud.com' $scheme://$http_host;
+            }
+
+            # PyTorch specific location.
+            # Index HTML is served by download.pytorch.org, but the wheels and
+            # their .metadata sidecars live on download-r2.pytorch.org (an R2
+            # CDN). The index also lists non-PyTorch packages (numpy, pillow,
+            # etc.) with absolute URLs to files.pythonhosted.org. All three
+            # hostnames must be rewritten or pip/uv will bypass this cache.
+            # Nested locations route by extension so both flows stay inside the cache.
+            location ^~ /whl {
+                proxy_set_header Connection "";
+                proxy_set_header Accept-Encoding "";
+
+                # Optimized for slow international connections (20 minutes timeout)
+                proxy_connect_timeout 300s;
+                proxy_read_timeout 1200s;
+                proxy_send_timeout 1200s;
+
+                # Override upstream Cache-Control: no-store so we can actually cache
+                proxy_ignore_headers Cache-Control Expires;
+
+                # Cache whl files (200) for a long time as they are versioned
+                proxy_cache_valid 200 301 1M;
+                proxy_cache_valid 404 1m;
+
+                # download.pytorch.org returns 403 for packages it doesn't host.
+                # Cache it so repeated dep-index lookups don't hammer upstream into 503s.
+                proxy_cache_valid 403 10m;
+
+                # Lock settings to prevent thundering herd during slow downloads
+                proxy_cache_lock on;
+                proxy_cache_lock_timeout 1200s;
+                proxy_cache_lock_age 1200s;
+
+                # Buffer optimizations for large files
+                proxy_buffers 8 1M;
+                proxy_buffer_size 1M;
+
+                # Rewrite index page links so all downloads stay within this cache
+                sub_filter 'https://download.pytorch.org'    $scheme://$http_host;
+                sub_filter 'https://download-r2.pytorch.org' $scheme://$http_host;
+                sub_filter 'https://files.pythonhosted.org'  $scheme://$http_host/pypi;
+                sub_filter_once off;
+                sub_filter_types text/html application/vnd.pypi.simple.v1+html application/vnd.pypi.simple.v1+json;
+
+                # Wheel payloads and PEP 658 metadata files go straight to R2.
+                location ~* ^/whl/.*\.(whl|metadata)$ {
+                    proxy_set_header Connection "";
+                    proxy_set_header Accept-Encoding "";
+
+                    proxy_connect_timeout 300s;
+                    proxy_read_timeout 1200s;
+                    proxy_send_timeout 1200s;
+
+                    # Override upstream Cache-Control: no-store and Set-Cookie so we can cache wheels.
+                    # download-r2.pytorch.org (CloudFlare R2) returns a Set-Cookie header (__cf_bm)
+                    # which by default makes nginx refuse to cache the response.
+                    proxy_ignore_headers Cache-Control Expires Set-Cookie;
+                    proxy_hide_header Set-Cookie;
+
+                    proxy_cache_valid 200 301 1M;
+                    proxy_cache_valid 404 1m;
+
+                    proxy_cache_lock on;
+                    proxy_cache_lock_timeout 1200s;
+                    proxy_cache_lock_age 1200s;
+
+                    proxy_buffers 8 1M;
+                    proxy_buffer_size 1M;
+                    proxy_set_header Host download-r2.pytorch.org;
+                    proxy_ssl_name download-r2.pytorch.org;
+                    proxy_ssl_verify off;
+                    proxy_ssl_protocols TLSv1.2;
+
+                    proxy_pass 'https://download-r2.pytorch.org';
+                    proxy_redirect 'https://download.pytorch.org'    $scheme://$http_host;
+                    proxy_redirect 'https://download-r2.pytorch.org' $scheme://$http_host;
+                }
+
+                # ── Known PyTorch package index pages → proxy to upstream ──
+                # Only these packages get proxied to download.pytorch.org.
+                location ~* ^/whl/[^/]+/(torch|torchvision|torchaudio)/$ {
+                    proxy_set_header Host download.pytorch.org;
+                    proxy_ssl_name download.pytorch.org;
+                    proxy_ssl_verify off;
+                    proxy_ssl_protocols TLSv1.2;
+                    proxy_pass 'https://download.pytorch.org';
+                    proxy_redirect 'https://download.pytorch.org'    $scheme://$http_host;
+                    proxy_redirect 'https://download-r2.pytorch.org' $scheme://$http_host;
+                }
+
+                # ── All other /whl index page requests → fast empty PEP 503 page ──
+                # pip/uv query the extra-index for every dependency.  For packages
+                # not hosted on download.pytorch.org the upstream returns 403 (slow
+                # international round-trip).  Return an empty simple-index page
+                # instantly so the client falls back to the main index.
+                location ~* ^/whl/[^/]+/[^/]+/$ {
+                    default_type 'text/html; charset=utf-8';
+                    return 200 '<!DOCTYPE html><html><head><meta name="pypi:repository-version" content="1.0"></head><body></body></html>';
+                }
+
+                # ── Fallback: everything else under /whl → proxy to upstream ──
+                # (torch index page, wheel files handled by nested locations above)
+                # Kept as a safety net — the two locations above should cover all
+                # index page requests.
+                proxy_set_header Host download.pytorch.org;
+                proxy_ssl_name download.pytorch.org;
+                proxy_ssl_verify off;
+                proxy_ssl_protocols TLSv1.2;
+
+                proxy_pass 'https://download.pytorch.org';
+                proxy_redirect 'https://download.pytorch.org'    $scheme://$http_host;
+                proxy_redirect 'https://download-r2.pytorch.org' $scheme://$http_host;
+            }
+
+            location /nginx_status {
+                stub_status;
+            }
+        }
+        include conf.d/*.conf;
+    }
+  rustcache.conf: |
+    proxy_cache_path /var/lib/nginx/rustup levels=1:2 keys_zone=rustup:16m inactive=1M max_size=200G use_temp_path=off;
+
+    upstream rustup_mirror {
+        server mirrors.huaweicloud.com:443;
+        server mirrors.huaweicloud.com:443;
+    }
+
+    server {
+        listen 8082 reuseport;
+
+        access_log /dev/stdout cachelog;
+        error_log /dev/stderr;
+
+        proxy_cache rustup;
+        proxy_ignore_headers Expires Cache-Control Set-Cookie;
+        proxy_hide_header Set-Cookie;
+        proxy_cache_lock on;
+        proxy_cache_lock_age 5m;
+        proxy_cache_lock_timeout 5m;
+        proxy_cache_revalidate on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_ssl_server_name on;
+
+        add_header X-Rustup-Cache $upstream_cache_status;
+
+        proxy_set_header Host mirrors.huaweicloud.com;
+        proxy_ssl_name mirrors.huaweicloud.com;
+        proxy_ssl_verify off;
+        proxy_ssl_protocols TLSv1.2;
+        proxy_redirect 'https://mirrors.huaweicloud.com/rustup' $scheme://$http_host;
+
+        # Channel manifests are updated on every release, use short TTL
+        location ~* \.(toml|sha256)$ {
+            proxy_cache_valid 200 10m;
+            proxy_cache_valid 404 1m;
+            proxy_pass https://rustup_mirror$request_uri;
+        }
+
+        # Toolchain tarballs and rustup-init binaries are versioned/immutable
+        location ~* \.(tar\.xz|tar\.gz|tar\.zst|pkg|msi|exe)$ {
+            proxy_cache_valid 200 1y;
+            proxy_cache_valid 404 1m;
+
+            proxy_buffers 8 1M;
+            proxy_buffer_size 1M;
+            proxy_connect_timeout 60s;
+            proxy_read_timeout 600s;
+            proxy_cache_lock_timeout 600s;
+            proxy_cache_lock_age 600s;
+
+            proxy_pass https://rustup_mirror$request_uri;
+        }
+
+        location / {
+            proxy_cache_valid 200 1h;
+            proxy_cache_valid 404 1m;
+            proxy_pass https://rustup_mirror$request_uri;
+        }
+    }
+  yumcache.conf: |
+    # openEuler / yum cache.
+    # Mirrors repo.huaweicloud.com/openeuler so dnf on openEuler nodes
+    # can install RPMs without going to the internet on every CI run.
+    #
+    # Clients rewrite the baseurl host to this service, e.g.
+    #   https://repo.openeuler.org/openEuler-22.03-LTS-SP4/OS/aarch64/...
+    #   -> http://cache-service:8083/openEuler-22.03-LTS-SP4/OS/aarch64/...
+    # nginx then prepends /openeuler when forwarding upstream.
+    #
+    # Cache TTLs are picked per file class:
+    #   - repodata/repomd.xml is the only mutable metadata filename; short TTL.
+    #   - other repodata/* files are content-addressed (sha256 in filename);
+    #     long TTL is safe.
+    #   - *.rpm files carry full NEVRA in the filename; effectively immutable.
+
+    upstream yum_mirror {
+        server repo.huaweicloud.com:443;
+        server repo.huaweicloud.com:443;
+    }
+
+    proxy_cache_path /var/lib/nginx/yum levels=1:2 keys_zone=yum:16m inactive=1M max_size=80G use_temp_path=off;
+
+    server {
+        listen 8083 reuseport;
+
+        access_log /dev/stdout cachelog;
+        error_log /dev/stderr;
+
+        proxy_cache yum;
+        proxy_ignore_headers Expires Cache-Control Set-Cookie;
+        proxy_hide_header Set-Cookie;
+        proxy_cache_lock on;
+        proxy_cache_lock_age 5m;
+        proxy_cache_lock_timeout 5m;
+        proxy_cache_revalidate on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_ssl_server_name on;
+
+        add_header X-Yum-Cache $upstream_cache_status;
+
+        proxy_set_header Host repo.huaweicloud.com;
+        proxy_ssl_name repo.huaweicloud.com;
+        proxy_ssl_verify off;
+        proxy_ssl_protocols TLSv1.2;
+        # Upstream redirects always include the /openeuler prefix; strip it
+        # alongside the host so the rewritten Location matches the path scheme
+        # clients use (without the prefix).
+        proxy_redirect 'https://repo.huaweicloud.com/openeuler' $scheme://$http_host;
+
+        # repomd.xml is the only repodata file with a fixed name and mutable
+        # content; everything else under repodata/ is content-addressed.
+        location ~* /repodata/repomd\.xml$ {
+            proxy_cache_valid 200 301 5m;
+            proxy_cache_valid 404 1m;
+            proxy_pass https://yum_mirror/openeuler$request_uri;
+        }
+
+        # Content-addressed metadata (sha256 prefix in filename) — safe to keep
+        location ~* /repodata/.+\.(xml\.gz|xml\.zst|xml|sqlite|sqlite\.bz2|sqlite\.gz|sqlite\.xz)$ {
+            proxy_cache_valid 200 301 1M;
+            proxy_cache_valid 404 1m;
+            proxy_pass https://yum_mirror/openeuler$request_uri;
+        }
+
+        # RPM payloads (NEVRA in filename) — effectively immutable
+        location ~* \.rpm$ {
+            proxy_cache_valid 200 301 1M;
+            proxy_cache_valid 404 1m;
+
+            proxy_buffers 8 1M;
+            proxy_buffer_size 1M;
+            proxy_connect_timeout 60s;
+            proxy_read_timeout 600s;
+            proxy_cache_lock_timeout 600s;
+            proxy_cache_lock_age 600s;
+
+            proxy_pass https://yum_mirror/openeuler$request_uri;
+        }
+
+        location / {
+            proxy_cache_valid 200 301 1h;
+            proxy_cache_valid 404 1m;
+            proxy_pass https://yum_mirror/openeuler$request_uri;
+        }
+    }
+kind: ConfigMap
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","data":{"debcache.conf":"# Global Cache settings\n\n# URI paths to avoid cache\n# These paths will change to indicate new release contents\n# All other .deb files can be cached nearly indefinitely, as the\n# version number is coded into the file name.\nmap $request_uri $nocache {\n    ~InRelease 1;\n    ~Release 1;\n    ~Packages 1;\n}\n\nupstream deb_mirror {\n    server repo.huaweicloud.com:443;\n    server repo.huaweicloud.com:443;\n}\n\nproxy_cache_path /var/lib/nginx/deb levels=1:2 keys_zone=deb:16m inactive=1M max_size=500G use_temp_path=off;\n# Deb Server\nserver {\n    # IF you need legacy IP, enable this one\n    listen 8081 reuseport;\n\n    # Everyone needs modern IP\n    #listen [::]:8081 reuseport;\n\n    #Log settings\n    access_log /dev/stdout cachelog;\n    error_log /dev/stderr;\n\n    # Cache Location\n    slice 1m;\n    proxy_cache deb;\n    proxy_ignore_headers Expires Cache-Control;\n    proxy_cache_valid 200 206 3650d;\n    proxy_cache_valid 301 302 0;\n    proxy_set_header  Range $slice_range;\n    proxy_cache_lock on;\n    proxy_cache_lock_age 5m;\n    proxy_cache_lock_timeout 5m;\n    proxy_cache_revalidate on;\n    proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;\n    #Nocache for those entries\n    proxy_cache_bypass $nocache;\n    proxy_no_cache $nocache;\n    # 1G max file\n    proxy_max_temp_file_size 1024m;\n    # Cache key\n    proxy_cache_key      $http_host$uri$slice_range;\n    # Upstream Configuration\n    proxy_next_upstream error timeout http_404;\n    # Cache status\n    add_header X-Cache-Status $upstream_cache_status;\n    proxy_ignore_client_abort on;\n    # Upstream request headers\n    proxy_ssl_server_name on;\n    proxy_http_version 1.1;\n    proxy_set_header Connection \"\";\n\n    # Redirect Locations\n    # Must include trailing slash!\n    proxy_redirect 'https://repo.huaweicloud.com' $scheme://$http_host;\n    proxy_set_header Host \"repo.huaweicloud.com\";\n    proxy_ssl_name repo.huaweicloud.com;\n    # Debian\n    location / {\n        proxy_pass https://deb_mirror;\n    }\n}\n","gocache.conf":"upstream go_mirror {\n    server repo.huaweicloud.com:443;\n    server repo.huaweicloud.com:443;\n}\n\nproxy_cache_path /var/lib/nginx/go levels=1:2 keys_zone=go:16m inactive=1M max_size=200G use_temp_path=off;\n\nserver {\n    listen 8084 reuseport;\n\n    access_log /dev/stdout cachelog;\n    error_log /dev/stderr;\n\n    proxy_cache go;\n    proxy_ignore_headers Expires Cache-Control Set-Cookie;\n    proxy_hide_header Set-Cookie;\n    proxy_cache_lock on;\n    proxy_cache_lock_age 5m;\n    proxy_cache_lock_timeout 5m;\n    proxy_cache_revalidate on;\n    proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;\n    proxy_http_version 1.1;\n    proxy_set_header Connection \"\";\n    proxy_ssl_server_name on;\n\n    add_header X-Go-Cache $upstream_cache_status;\n\n    proxy_set_header Host repo.huaweicloud.com;\n    proxy_ssl_name repo.huaweicloud.com;\n    proxy_ssl_verify off;\n    proxy_ssl_protocols TLSv1.2;\n    proxy_redirect 'https://repo.huaweicloud.com/repository/goproxy' $scheme://$http_host;\n\n    # Module metadata (.mod/.info) - long TTL (immutable, versioned)\n    location ~* \\.(mod|info)$ {\n        proxy_cache_valid 200 301 1M;\n        proxy_cache_valid 404 1m;\n\n        proxy_set_header Host repo.huaweicloud.com;\n        proxy_ssl_name repo.huaweicloud.com;\n        proxy_pass https://go_mirror/repository/goproxy$request_uri;\n\n        # Fallback to goproxy.cn when Huawei Cloud hasn't synced yet\n        proxy_intercept_errors on;\n        error_page 404 = @go_fallback;\n    }\n\n    # Module zip files - long TTL (versioned, immutable)\n    location ~* \\.zip$ {\n        proxy_cache_valid 200 301 1M;\n        proxy_cache_valid 404 1m;\n\n        proxy_buffers 8 1M;\n        proxy_buffer_size 1M;\n        proxy_connect_timeout 60s;\n        proxy_read_timeout 600s;\n        proxy_cache_lock_timeout 600s;\n        proxy_cache_lock_age 600s;\n\n        proxy_set_header Host repo.huaweicloud.com;\n        proxy_ssl_name repo.huaweicloud.com;\n        proxy_pass https://go_mirror/repository/goproxy$request_uri;\n\n        # Fallback to goproxy.cn when Huawei Cloud hasn't synced yet\n        proxy_intercept_errors on;\n        error_page 404 = @go_fallback;\n    }\n\n    location @go_fallback {\n        proxy_cache_valid 200 301 1M;\n        proxy_cache_valid 404 1m;\n\n        proxy_buffers 8 1M;\n        proxy_buffer_size 1M;\n\n        proxy_set_header Host goproxy.cn;\n        proxy_ssl_name goproxy.cn;\n        proxy_ssl_verify off;\n        proxy_ssl_protocols TLSv1.2;\n        proxy_pass https://goproxy.cn$request_uri;\n    }\n\n    # Version list endpoints (@v/list, @latest) - mutable, short TTL\n    location @go_list_fallback {\n        proxy_cache_valid 200 301 1h;\n        proxy_cache_valid 404 1m;\n\n        proxy_set_header Host goproxy.cn;\n        proxy_ssl_name goproxy.cn;\n        proxy_ssl_verify off;\n        proxy_ssl_protocols TLSv1.2;\n        proxy_pass https://goproxy.cn$request_uri;\n    }\n\n    location / {\n        proxy_cache_valid 200 301 1h;\n        proxy_cache_valid 404 1m;\n\n        proxy_set_header Host repo.huaweicloud.com;\n        proxy_ssl_name repo.huaweicloud.com;\n        proxy_pass https://go_mirror/repository/goproxy$request_uri;\n\n        # Fallback to goproxy.cn for version list queries\n        proxy_intercept_errors on;\n        error_page 404 = @go_list_fallback;\n    }\n}\n","nginx.conf":"# Loosely based on the following:\n# (note these do not work correctly in 2023)\n# https://joelkleier.com/blog/2018-04-17-pypi-temporary-cache.html\n# https://gist.github.com/dctrwatson/5785638#file-nginx-conf\n# It's also very easy to end up not proxying requests; tests/mitmtest.sh should help verify that\n# pip installs actually avoid hitting upstream\n\nerror_log /dev/stderr;\n# Log to file, can be useful for dev\n# error_log /var/log/nginx/error.log;\npid /var/run/nginx.pid;\n\nworker_processes 16;\nworker_rlimit_nofile 65535;\n\nevents {\n    worker_connections 2048;\n}\n\nhttp {\n    include /etc/nginx/mime.types;\n    default_type application/octet-stream;\n    sendfile on;\n    tcp_nodelay on;\n    tcp_nopush off;\n    reset_timedout_connection on;\n    server_tokens off;\n    gzip on;\n    gzip_types application/vnd.pypi.simple.v1+json;\n    gzip_proxied any;\n    gzip_vary on;\n\n    log_format cachelog '$remote_addr - $http_host [$time_local] '\n                        'request_time=$request_time upstream_time=$upstream_response_time '\n                        'cache_key=\"$uri/$http_accept_encoding\" '\n                        'cache_status=$upstream_cache_status '\n                        'upstream_bytes=$upstream_bytes_received \\t'\n                        '$status $proxy_host \"$request\" $body_bytes_sent';\n    access_log /dev/stdout cachelog buffer=64k flush=1s;\n    # Log to file, can be useful for dev\n    # access_log /var/log/nginx/cache.log pypi_cache buffer=64k flush=1s;\n\n    # Cache 500G worth of packages for up to 1 month\n    proxy_cache_path /var/lib/nginx/pypi levels=1:2 keys_zone=pypi:16m inactive=1M max_size=500G use_temp_path=off;\n\n    # mirrors.huaweicloud.com syncs faster than repo and doesn't have the\n    # 12 h CDN cache issue. Defined as an upstream so nginx resolves the\n    # hostname at startup (no runtime resolver directive needed).\n    upstream mirrors_simple {\n        server mirrors.huaweicloud.com:443;\n        server mirrors.huaweicloud.com:443;\n    }\n\n    # Having the same upstream server listed twice allegedly forces nginx to retry\n    # connections and not fail the request immediately.\n\n    server {\n        listen 80 default_server;\n\n        proxy_cache pypi;\n        proxy_cache_key $uri/$http_accept_encoding;\n        proxy_cache_lock on;\n        proxy_cache_lock_age 5m;\n        proxy_cache_lock_timeout 5m;\n        proxy_cache_revalidate on;\n        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;\n\n        proxy_http_version 1.1;\n        proxy_ssl_server_name on;\n\n        # sub_filter can't apply to gzipped content, so be careful about that\n        add_header X-Pypi-Cache $upstream_cache_status;\n        sub_filter 'https://repo.huaweicloud.com' $scheme://$http_host;\n        sub_filter 'https://repo.huaweicloud.com/repository/pypi/packages' $scheme://$http_host/pypi/packages;\n        # When falling back to upstream pypi.org, its simple index links to files.pythonhosted.org;\n        # rewrite so package downloads come back through this cache (and pick up the /pypi/packages fallback)\n        sub_filter 'https://files.pythonhosted.org' $scheme://$http_host/pypi;\n        # Rewrite PyTorch links to stay within this cache.\n        # The index HTML served by download.pytorch.org lists wheel files\n        # with absolute URLs pointing to the R2 CDN (download-r2.pytorch.org),\n        # so both hostnames must be rewritten or pip will bypass this cache.\n        sub_filter 'https://download.pytorch.org'    $scheme://$http_host;\n        sub_filter 'https://download-r2.pytorch.org' $scheme://$http_host;\n\n        sub_filter_once off;\n        sub_filter_types application/vnd.pypi.simple.v1+json application/vnd.pypi.simple.v1+html text/html;\n\n        location / {\n            proxy_set_header Connection \"\";\n            proxy_set_header Accept-Encoding \"\";\n            proxy_cache_valid 200 301 4h;\n            proxy_cache_valid 404 1m;\n\n            proxy_set_header Host repo.huaweicloud.com;\n            proxy_ssl_name repo.huaweicloud.com;\n            proxy_ssl_verify  off;\n            proxy_ssl_protocols TLSv1.2;\n            proxy_pass 'https://repo.huaweicloud.com/repository/';\n            proxy_redirect 'https://repo.huaweicloud.com' $scheme://$http_host;\n        }\n\n        location ^~ /pypi/simple {\n            proxy_set_header Connection \"\";\n            proxy_set_header Accept-Encoding \"\";\n            proxy_cache_valid 200 301 10m;\n\n            # Use mirrors_simple upstream (mirrors.huaweicloud.com) instead of\n            # repo.huaweicloud.com: repo's CDN caches the simple index up to\n            # 12 h and returns HTTP 200 with stale content, so the 404 fallback\n            # never fires. mirrors syncs faster and returns relative package\n            # URLs so the server-level sub_filter rules need no changes.\n            proxy_set_header Host mirrors.huaweicloud.com;\n            proxy_ssl_name mirrors.huaweicloud.com;\n            proxy_ssl_verify  off;\n            proxy_ssl_protocols TLSv1.2;\n            proxy_pass 'https://mirrors_simple/repository$request_uri';\n            proxy_redirect 'https://mirrors.huaweicloud.com' $scheme://$http_host;\n\n            # Fall back to pypi.org on 404 (package not yet synced to mirrors)\n            proxy_intercept_errors on;\n            error_page 404 = @pypi_simple_fallback;\n        }\n\n        location @pypi_simple_fallback {\n            proxy_set_header Connection \"\";\n            proxy_set_header Accept-Encoding \"\";\n            proxy_cache_valid 200 301 10m;\n\n            # Strip /pypi prefix so pypi.org sees /simple/\u003cpkg\u003e/\n            rewrite ^/pypi/(.*)$ /$1 break;\n\n            proxy_set_header Host pypi.org;\n            proxy_ssl_name pypi.org;\n            proxy_ssl_verify off;\n            proxy_ssl_protocols TLSv1.2;\n            # No variable in proxy_pass — nginx resolves pypi.org once at\n            # startup, so no `resolver` directive is needed.\n            proxy_pass 'https://pypi.org';\n            proxy_redirect 'https://pypi.org' $scheme://$http_host;\n        }\n\n        location ^~ /pypi/packages {\n            proxy_set_header Connection \"\";\n            proxy_set_header Accept-Encoding \"\";\n            proxy_cache_valid 200 301 1M;\n\n            proxy_set_header Host repo.huaweicloud.com;\n            proxy_ssl_name repo.huaweicloud.com;\n            proxy_ssl_verify off;\n            proxy_ssl_protocols TLSv1.2;\n            # $request_uri is appended verbatim, so /pypi/packages/foo.whl\n            # becomes repo.huaweicloud.com/repository/pypi/packages/foo.whl\n            proxy_pass 'https://repo.huaweicloud.com/repository$request_uri';\n            proxy_redirect 'https://repo.huaweicloud.com' $scheme://$http_host;\n\n            # Fall back to official pythonhosted CDN when huaweicloud hasn't synced yet\n            proxy_intercept_errors on;\n            error_page 404 = @packages_fallback;\n        }\n\n        location @packages_fallback {\n            proxy_set_header Connection \"\";\n            proxy_set_header Accept-Encoding \"\";\n            proxy_cache_valid 200 301 1M;\n\n            # Strip the /pypi prefix we added so the upstream path matches pythonhosted layout\n            rewrite ^/pypi/(.*)$ /$1 break;\n\n            proxy_set_header Host files.pythonhosted.org;\n            proxy_ssl_name files.pythonhosted.org;\n            proxy_ssl_verify off;\n            proxy_ssl_protocols TLSv1.2;\n            proxy_pass 'https://files.pythonhosted.org';\n        }\n\n        location ^~ /packages {\n            proxy_set_header Connection \"\";\n            proxy_set_header Accept-Encoding \"\";\n            proxy_cache_valid 200 301 1M;\n            proxy_cache_valid 404 1m;\n\n            proxy_set_header Host repo.huaweicloud.com;\n            proxy_ssl_name repo.huaweicloud.com;\n            proxy_ssl_verify  off;\n            proxy_ssl_protocols TLSv1.2;\n            proxy_pass 'https://repo.huaweicloud.com/repository/';\n            proxy_redirect 'https://repo.huaweicloud.com' $scheme://$http_host;\n        }\n\n        # Ascend custom pypi index on huaweicloud.\n        # Hosts wheels too large for public PyPI's 100 MB limit\n        # (e.g. triton-ascend 3.2.1 is ~180 MB). Path is served verbatim\n        # without the /repository/ prefix the default location adds,\n        # so proxy_pass uses $request_uri directly.\n        # Wheels carry version in the filename — 1-month TTL is safe.\n        location ^~ /ascend/repos {\n            proxy_set_header Connection \"\";\n            proxy_set_header Accept-Encoding \"\";\n\n            # Some wheels exceed 180 MB; mirror the /whl timeout/lock\n            # settings used for slow large downloads.\n            proxy_connect_timeout 300s;\n            proxy_read_timeout 1200s;\n            proxy_send_timeout 1200s;\n\n            proxy_cache_valid 200 301 1M;\n            proxy_cache_valid 404 1m;\n\n            proxy_cache_lock on;\n            proxy_cache_lock_timeout 1200s;\n            proxy_cache_lock_age 1200s;\n\n            proxy_buffers 8 1M;\n            proxy_buffer_size 1M;\n\n            proxy_set_header Host repo.huaweicloud.com;\n            proxy_ssl_name repo.huaweicloud.com;\n            proxy_ssl_verify off;\n            proxy_ssl_protocols TLSv1.2;\n            proxy_pass 'https://repo.huaweicloud.com$request_uri';\n            proxy_redirect 'https://repo.huaweicloud.com' $scheme://$http_host;\n        }\n\n        # PyTorch specific location.\n        # Index HTML is served by download.pytorch.org, but the wheels and\n        # their .metadata sidecars live on download-r2.pytorch.org (an R2\n        # CDN). The index also lists non-PyTorch packages (numpy, pillow,\n        # etc.) with absolute URLs to files.pythonhosted.org. All three\n        # hostnames must be rewritten or pip/uv will bypass this cache.\n        # Nested locations route by extension so both flows stay inside the cache.\n        location ^~ /whl {\n            proxy_set_header Connection \"\";\n            proxy_set_header Accept-Encoding \"\";\n\n            # Optimized for slow international connections (20 minutes timeout)\n            proxy_connect_timeout 300s;\n            proxy_read_timeout 1200s;\n            proxy_send_timeout 1200s;\n\n            # Override upstream Cache-Control: no-store so we can actually cache\n            proxy_ignore_headers Cache-Control Expires;\n\n            # Cache whl files (200) for a long time as they are versioned\n            proxy_cache_valid 200 301 1M;\n            proxy_cache_valid 404 1m;\n\n            # download.pytorch.org returns 403 for packages it doesn't host.\n            # Cache it so repeated dep-index lookups don't hammer upstream into 503s.\n            proxy_cache_valid 403 10m;\n\n            # Lock settings to prevent thundering herd during slow downloads\n            proxy_cache_lock on;\n            proxy_cache_lock_timeout 1200s;\n            proxy_cache_lock_age 1200s;\n\n            # Buffer optimizations for large files\n            proxy_buffers 8 1M;\n            proxy_buffer_size 1M;\n\n            # Rewrite index page links so all downloads stay within this cache\n            sub_filter 'https://download.pytorch.org'    $scheme://$http_host;\n            sub_filter 'https://download-r2.pytorch.org' $scheme://$http_host;\n            sub_filter 'https://files.pythonhosted.org'  $scheme://$http_host/pypi;\n            sub_filter_once off;\n            sub_filter_types text/html application/vnd.pypi.simple.v1+html application/vnd.pypi.simple.v1+json;\n\n            # Wheel payloads and PEP 658 metadata files go straight to R2.\n            location ~* ^/whl/.*\\.(whl|metadata)$ {\n                proxy_set_header Connection \"\";\n                proxy_set_header Accept-Encoding \"\";\n\n                proxy_connect_timeout 300s;\n                proxy_read_timeout 1200s;\n                proxy_send_timeout 1200s;\n\n                # Override upstream Cache-Control: no-store and Set-Cookie so we can cache wheels.\n                # download-r2.pytorch.org (CloudFlare R2) returns a Set-Cookie header (__cf_bm)\n                # which by default makes nginx refuse to cache the response.\n                proxy_ignore_headers Cache-Control Expires Set-Cookie;\n                proxy_hide_header Set-Cookie;\n\n                proxy_cache_valid 200 301 1M;\n                proxy_cache_valid 404 1m;\n\n                proxy_cache_lock on;\n                proxy_cache_lock_timeout 1200s;\n                proxy_cache_lock_age 1200s;\n\n                proxy_buffers 8 1M;\n                proxy_buffer_size 1M;\n                proxy_set_header Host download-r2.pytorch.org;\n                proxy_ssl_name download-r2.pytorch.org;\n                proxy_ssl_verify off;\n                proxy_ssl_protocols TLSv1.2;\n\n                proxy_pass 'https://download-r2.pytorch.org';\n                proxy_redirect 'https://download.pytorch.org'    $scheme://$http_host;\n                proxy_redirect 'https://download-r2.pytorch.org' $scheme://$http_host;\n            }\n\n            # ── Known PyTorch package index pages → proxy to upstream ──\n            # Only these packages get proxied to download.pytorch.org.\n            location ~* ^/whl/[^/]+/(torch|torchvision|torchaudio)/$ {\n                proxy_set_header Host download.pytorch.org;\n                proxy_ssl_name download.pytorch.org;\n                proxy_ssl_verify off;\n                proxy_ssl_protocols TLSv1.2;\n                proxy_pass 'https://download.pytorch.org';\n                proxy_redirect 'https://download.pytorch.org'    $scheme://$http_host;\n                proxy_redirect 'https://download-r2.pytorch.org' $scheme://$http_host;\n            }\n\n            # ── All other /whl index page requests → fast empty PEP 503 page ──\n            # pip/uv query the extra-index for every dependency.  For packages\n            # not hosted on download.pytorch.org the upstream returns 403 (slow\n            # international round-trip).  Return an empty simple-index page\n            # instantly so the client falls back to the main index.\n            location ~* ^/whl/[^/]+/[^/]+/$ {\n                default_type 'text/html; charset=utf-8';\n                return 200 '\u003c!DOCTYPE html\u003e\u003chtml\u003e\u003chead\u003e\u003cmeta name=\"pypi:repository-version\" content=\"1.0\"\u003e\u003c/head\u003e\u003cbody\u003e\u003c/body\u003e\u003c/html\u003e';\n            }\n\n            # ── Fallback: everything else under /whl → proxy to upstream ──\n            # (torch index page, wheel files handled by nested locations above)\n            # Kept as a safety net — the two locations above should cover all\n            # index page requests.\n            proxy_set_header Host download.pytorch.org;\n            proxy_ssl_name download.pytorch.org;\n            proxy_ssl_verify off;\n            proxy_ssl_protocols TLSv1.2;\n\n            proxy_pass 'https://download.pytorch.org';\n            proxy_redirect 'https://download.pytorch.org'    $scheme://$http_host;\n            proxy_redirect 'https://download-r2.pytorch.org' $scheme://$http_host;\n        }\n\n        location /nginx_status {\n            stub_status;\n        }\n    }\n    include conf.d/*.conf;\n}\n","rustcache.conf":"proxy_cache_path /var/lib/nginx/rustup levels=1:2 keys_zone=rustup:16m inactive=1M max_size=200G use_temp_path=off;\n\nupstream rustup_mirror {\n    server mirrors.huaweicloud.com:443;\n    server mirrors.huaweicloud.com:443;\n}\n\nserver {\n    listen 8082 reuseport;\n\n    access_log /dev/stdout cachelog;\n    error_log /dev/stderr;\n\n    proxy_cache rustup;\n    proxy_ignore_headers Expires Cache-Control Set-Cookie;\n    proxy_hide_header Set-Cookie;\n    proxy_cache_lock on;\n    proxy_cache_lock_age 5m;\n    proxy_cache_lock_timeout 5m;\n    proxy_cache_revalidate on;\n    proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;\n    proxy_http_version 1.1;\n    proxy_set_header Connection \"\";\n    proxy_ssl_server_name on;\n\n    add_header X-Rustup-Cache $upstream_cache_status;\n\n    proxy_set_header Host mirrors.huaweicloud.com;\n    proxy_ssl_name mirrors.huaweicloud.com;\n    proxy_ssl_verify off;\n    proxy_ssl_protocols TLSv1.2;\n    proxy_redirect 'https://mirrors.huaweicloud.com/rustup' $scheme://$http_host;\n\n    # Channel manifests are updated on every release, use short TTL\n    location ~* \\.(toml|sha256)$ {\n        proxy_cache_valid 200 10m;\n        proxy_cache_valid 404 1m;\n        proxy_pass https://rustup_mirror$request_uri;\n    }\n\n    # Toolchain tarballs and rustup-init binaries are versioned/immutable\n    location ~* \\.(tar\\.xz|tar\\.gz|tar\\.zst|pkg|msi|exe)$ {\n        proxy_cache_valid 200 1y;\n        proxy_cache_valid 404 1m;\n\n        proxy_buffers 8 1M;\n        proxy_buffer_size 1M;\n        proxy_connect_timeout 60s;\n        proxy_read_timeout 600s;\n        proxy_cache_lock_timeout 600s;\n        proxy_cache_lock_age 600s;\n\n        proxy_pass https://rustup_mirror$request_uri;\n    }\n\n    location / {\n        proxy_cache_valid 200 1h;\n        proxy_cache_valid 404 1m;\n        proxy_pass https://rustup_mirror$request_uri;\n    }\n}\n","yumcache.conf":"# openEuler / yum cache.\n# Mirrors repo.huaweicloud.com/openeuler so dnf on openEuler nodes\n# can install RPMs without going to the internet on every CI run.\n#\n# Clients rewrite the baseurl host to this service, e.g.\n#   https://repo.openeuler.org/openEuler-22.03-LTS-SP4/OS/aarch64/...\n#   -\u003e http://cache-service:8083/openEuler-22.03-LTS-SP4/OS/aarch64/...\n# nginx then prepends /openeuler when forwarding upstream.\n#\n# Cache TTLs are picked per file class:\n#   - repodata/repomd.xml is the only mutable metadata filename; short TTL.\n#   - other repodata/* files are content-addressed (sha256 in filename);\n#     long TTL is safe.\n#   - *.rpm files carry full NEVRA in the filename; effectively immutable.\n\nupstream yum_mirror {\n    server repo.huaweicloud.com:443;\n    server repo.huaweicloud.com:443;\n}\n\nproxy_cache_path /var/lib/nginx/yum levels=1:2 keys_zone=yum:16m inactive=1M max_size=80G use_temp_path=off;\n\nserver {\n    listen 8083 reuseport;\n\n    access_log /dev/stdout cachelog;\n    error_log /dev/stderr;\n\n    proxy_cache yum;\n    proxy_ignore_headers Expires Cache-Control Set-Cookie;\n    proxy_hide_header Set-Cookie;\n    proxy_cache_lock on;\n    proxy_cache_lock_age 5m;\n    proxy_cache_lock_timeout 5m;\n    proxy_cache_revalidate on;\n    proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;\n    proxy_http_version 1.1;\n    proxy_set_header Connection \"\";\n    proxy_ssl_server_name on;\n\n    add_header X-Yum-Cache $upstream_cache_status;\n\n    proxy_set_header Host repo.huaweicloud.com;\n    proxy_ssl_name repo.huaweicloud.com;\n    proxy_ssl_verify off;\n    proxy_ssl_protocols TLSv1.2;\n    # Upstream redirects always include the /openeuler prefix; strip it\n    # alongside the host so the rewritten Location matches the path scheme\n    # clients use (without the prefix).\n    proxy_redirect 'https://repo.huaweicloud.com/openeuler' $scheme://$http_host;\n\n    # repomd.xml is the only repodata file with a fixed name and mutable\n    # content; everything else under repodata/ is content-addressed.\n    location ~* /repodata/repomd\\.xml$ {\n        proxy_cache_valid 200 301 5m;\n        proxy_cache_valid 404 1m;\n        proxy_pass https://yum_mirror/openeuler$request_uri;\n    }\n\n    # Content-addressed metadata (sha256 prefix in filename) — safe to keep\n    location ~* /repodata/.+\\.(xml\\.gz|xml\\.zst|xml|sqlite|sqlite\\.bz2|sqlite\\.gz|sqlite\\.xz)$ {\n        proxy_cache_valid 200 301 1M;\n        proxy_cache_valid 404 1m;\n        proxy_pass https://yum_mirror/openeuler$request_uri;\n    }\n\n    # RPM payloads (NEVRA in filename) — effectively immutable\n    location ~* \\.rpm$ {\n        proxy_cache_valid 200 301 1M;\n        proxy_cache_valid 404 1m;\n\n        proxy_buffers 8 1M;\n        proxy_buffer_size 1M;\n        proxy_connect_timeout 60s;\n        proxy_read_timeout 600s;\n        proxy_cache_lock_timeout 600s;\n        proxy_cache_lock_age 600s;\n\n        proxy_pass https://yum_mirror/openeuler$request_uri;\n    }\n\n    location / {\n        proxy_cache_valid 200 301 1h;\n        proxy_cache_valid 404 1m;\n        proxy_pass https://yum_mirror/openeuler$request_uri;\n    }\n}\n"},"kind":"ConfigMap","metadata":{"annotations":{},"name":"pypi-cache-conf","namespace":"nginx-pypi-cache"}}
+  creationTimestamp: "2025-08-30T08:30:08Z"
+  name: pypi-cache-conf
+  namespace: nginx-pypi-cache
+  resourceVersion: "1217208300"
+  uid: 1f3c2672-8d81-49c3-be65-84807902b45f

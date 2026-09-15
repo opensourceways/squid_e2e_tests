@@ -1,0 +1,152 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: cachepeer-compare-
+  labels:
+    kubernetes.io/arch: amd64
+    pipeline/run-id: cachepeer-compare-direct
+  name: cachepeer-apt-pip-go-compare-direct
+  namespace: squid
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  policies:
+  - action: AbortJob
+    event: PodFailed
+  queue: shared-flexible-queue
+  schedulerName: volcano
+  tasks:
+  - maxRetry: 1
+    minAvailable: 1
+    name: apt-squid-direct
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - "set -e\nPKG=xz-utils\nt() { echo \"$(( ( $(date +%s%N) - $1 ) / 1000000 ))\"; }\necho \"MODE=$MODE\"\nT0=$(date +%s%N)\napt-get update -qq 2>&1 | tail -2 || true\necho \"apt-get update(squid): $(t $T0) ms\"\nfor i in 1 2; do\n  T0=$(date +%s%N)\n  apt-get download \"$PKG\" -o Dir::Cache=/tmp/apt-squid >/dev/null 2>&1 || true\n  echo \"apt-get download $PKG pass$i(squid): $(t $T0) ms\"\ndone\necho \"===== 完成（$MODE）：pass2 应显著快于 pass1（squid HIT）；核对 access.log =====\"\necho \"  grep -E 'archive.ubuntu.com' /var/log/squid/access.log | tail\"\n"
+          command:
+          - /bin/bash
+          - -c
+          env:
+          - name: MODE
+            value: apt-direct
+          image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+          name: apt
+          resources:
+            limits:
+              cpu: '2'
+              memory: 4Gi
+            requests:
+              cpu: '1'
+              memory: 2Gi
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: amd64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+  - maxRetry: 1
+    minAvailable: 1
+    name: pip-squid-direct
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - "set -e\nt() { echo \"$(( ( $(date +%s%N) - $1 ) / 1000000 ))\"; }\necho \"MODE=$MODE\"\nrm -rf /tmp/pip-squid\nfor i in 1 2; do\n  T0=$(date +%s%N)\n  pip download requests==2.31.0 --no-deps -d /tmp/pip-squid --quiet 2>&1 | tail -1 || true\n  echo \"pip download pass$i(squid): $(t $T0) ms\"\ndone\necho \"===== 完成（$MODE）：pass2 应命中缓存；核对 access.log =====\"\necho \"  grep -E 'pypi.org|pythonhosted' /var/log/squid/access.log | tail\"\n"
+          command:
+          - /bin/bash
+          - -c
+          env:
+          - name: MODE
+            value: pip-direct
+          image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+          name: pip
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                - /bin/sh
+                - -c
+                - set +e; P=/etc/squid-ca/squid-ca.pem; if [ -f "$P" ]; then cp "$P" /usr/local/share/ca-certificates/squid-ca.crt; update-ca-certificates -f >/dev/null 2>&1; fi; exit 0
+          resources:
+            limits:
+              cpu: '2'
+              memory: 4Gi
+            requests:
+              cpu: '1'
+              memory: 2Gi
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: amd64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert
+  - maxRetry: 1
+    minAvailable: 1
+    name: go-squid-direct
+    replicas: 1
+    template:
+      spec:
+        activeDeadlineSeconds: 1800
+        containers:
+        - args:
+          - "set -e\nt() { echo \"$(( ( $(date +%s%N) - $1 ) / 1000000 ))\"; }\necho \"MODE=$MODE\"\nif command -v go >/dev/null 2>&1; then\n  mkdir -p /tmp/gomod && cd /tmp/gomod\n  printf 'module tmp.example/compare\\n\\ngo 1.21\\n\\nrequire golang.org/x/net v0.17.0\\n' > go.mod\n  for i in 1 2; do\n    T0=$(date +%s%N)\n    GOPROXY=https://proxy.golang.org,direct go mod download golang.org/x/net 2>&1 | tail -1 || true\n    echo \"go mod download pass$i(squid): $(t $T0) ms\"\n  done\nelse\n  echo \"!! 镜像无 go，降级为 curl 线级对照（wire 路径等价）\"\n  U=\"https://proxy.golang.org/golang.org/x/net/@v/golang.org/x/net@v0.17.0.mod\"\n  for i in 1 2 3; do\n    T0=$(date +%s%N)\n    curl -s \"$U\" -o /dev/null -w \"curl pass$i(squid): code=%{http_code} \" --max-time 30 || true\n    echo \"$(t $T0) ms\"\n  done\nfi\necho \"===== 完成（$MODE）：核对 access.log 的 MISS/HIT 与 HIER =====\"\necho \"  grep -E 'proxy.golang.org' /var/log/squid/access.log | tail\"\n"
+          command:
+          - /bin/bash
+          - -c
+          env:
+          - name: MODE
+            value: go-direct
+          image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+          name: go
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                - /bin/sh
+                - -c
+                - set +e; P=/etc/squid-ca/squid-ca.pem; if [ -f "$P" ]; then cp "$P" /usr/local/share/ca-certificates/squid-ca.crt; update-ca-certificates -f >/dev/null 2>&1; fi; exit 0
+          resources:
+            limits:
+              cpu: '2'
+              memory: 4Gi
+            requests:
+              cpu: '1'
+              memory: 2Gi
+          volumeMounts:
+          - mountPath: /etc/squid-ca
+            name: squid-ca
+            readOnly: true
+        imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+        nodeSelector:
+          kubernetes.io/arch: amd64
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 0
+        volumes:
+        - name: squid-ca
+          secret:
+            items:
+            - key: squid-ca.pem
+              path: squid-ca.pem
+            optional: true
+            secretName: squid-ca-cert

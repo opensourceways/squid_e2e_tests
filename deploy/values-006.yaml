@@ -21,10 +21,23 @@ squid:
     limits:
       cpu: 2
       memory: 4Gi
-  # gy-006：开启境外静态流量 → 国内镜像的 url_rewrite 重定向（T2）
-  # 覆盖域见 chart/templates/configmap.yaml 的 mirror-rewrite.sh 头部注释
-  urlRewrite:
+  # gy-006：回源缓存 peer（client-first bump 下 https 域重新可用，见 cachepeer/clientfirst-bump/TEST-WORKFLOW.md）
+  # ⚠️ 前提：chart 0.1.14 client-first bump。server-first 下 https GET 被 PINNED，
+  # peer/never_direct 结构性不可用（JUDGEMENT.md 修订①），故 0.1.13 曾回退至仅 apt-peer。
+  # 端口归属：8081=deb 8084=go(Nexus goproxy+goproxy.cn fallback) 8086=pypi origin-form
+  # （8086：/simple→huaweicloud /repository/pypi/simple，404 fallback pypi.org；/packages→pythonhosted）
+  cachePeer:
     enabled: true
+    peers:
+    - name: apt-peer
+      port: 8081
+      domains: ".archive.ubuntu.com .security.ubuntu.com .ports.ubuntu.com .debian.org"
+    - name: go-peer
+      port: 8084
+      domains: ".proxy.golang.org"
+    - name: pypi-peer
+      port: 8086
+      domains: ".pypi.org .files.pythonhosted.org"
 
 images:
   squid:

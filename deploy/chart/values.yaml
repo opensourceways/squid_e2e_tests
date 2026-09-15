@@ -49,11 +49,31 @@ squid:
     limits:
       cpu: 2
       memory: 4Gi
-  # 境外静态下载 → 国内镜像的 url_rewrite 重定向（T2）。默认关闭，需要换源的集群（如 gy-006）开启。
-  # 开启后：configmap 生成 mirror-rewrite.sh helper 并追加 url_rewrite 段，statefulset 挂载 helper。
-  # 注意：目标域与新镜像域都被 ssl_bump bump all 覆盖，勿把镜像域加进 registry splice 名单。
-  urlRewrite:
+  # ── 回源缓存 peer（集群内 nginx-pypi-cache/cache-service，按端口分片）──
+  # 选路不改 URL：squid 按目标域把请求原样转发给 peer（origin-form + 原 Host），
+  # 缓存键不变——从机制上避开 url_rewrite 在 ssl-bump 下的连接复用缺陷
+  # （见 redirect/gh-proxy/JUDGEMENT.md 修订⑥、redirect/cachepeer/TEST-WORKFLOW.md）。
+  # ⚠️ 前提：client-first bump（chart 0.1.14）。server-first（peek→bump）下 https GET 被
+  # PINNED 到 origin 连接、选路跳过全部 peer，且 never_direct 会把 pinned 直连拦成必然 503
+  # （cachepeer/JUDGEMENT.md 修订①）——client-first 化解此约束后 https 域才可配 peer。
+  # originserver：peer 为 origin 形态 nginx，强制 origin-form 转发（absolute-form https
+  # 会被 nginx 拒绝/污染 $request_uri）。
+  # 端口归属实测（2026-09-08 P0 勘验 + 2026-09-15 8086 注入）：
+  #   8081=deb(repo.huaweicloud.com) 8082=rustup 8083=yum/openEuler 8084=go(goproxy.cn)
+  #   8085=crates 8086=pypi origin-form（/simple→huaweicloud，fallback pypi.org；/packages→pythonhosted）
+  # ⚠️ never_direct 是硬强制：peer 挂掉时对应域 fail-closed（快速失败，不回官方源）
+  cachePeer:
     enabled: false
+    host: cache-service.nginx-pypi-cache.svc.cluster.local
+    peers: []
+    # 每项 = 一个 peer：name（squid peer/ACL 标识）、port、domains（dstdomain 空格分隔清单）
+    # 示例（gy-006 实测可用）：
+    # - name: apt-peer
+    #   port: 8081
+    #   domains: ".archive.ubuntu.com .security.ubuntu.com .ports.ubuntu.com .debian.org"
+    # - name: go-peer
+    #   port: 8084
+    #   domains: ".proxy.golang.org"
 
 exporter:
   enabled: true
@@ -71,7 +91,9 @@ exporter:
 
 registryProxy:
   enabled: true
-  registries: "swr.cn-north-4.myhuaweicloud.com swr.cn-southwest-2.myhuaweicloud.com registry.k8s.io ghcr.io gcr.io quay.io"
+  # 域名白名单（空格分隔）：同时作为 rpardini 代理/缓存清单 和 squid.conf `acl registry` 的输入。
+  # 增删域名只改这里即可，无需 bump chart 版本。
+  registries: "swr.cn-north-4.myhuaweicloud.com swr.cn-southwest-2.myhuaweicloud.com swr.cn-north-12.myhuaweicloud.com registry.k8s.io ghcr.io gcr.io quay.io"
   enableManifestCache: "false"
   cacheMaxSize: "100g"
   allowPush: "true"

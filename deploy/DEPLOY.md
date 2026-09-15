@@ -156,9 +156,9 @@ env:
 - name: https_proxy
   value: "http://squid-cache.squid.svc.cluster.local:3128"
 - name: NO_PROXY
-  value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+  value: "0.0.0.0,localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
 - name: no_proxy
-  value: "localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+  value: "0.0.0.0,localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
 ```
 
 > ⚠️ **NO_PROXY 必须包含 `.buildkitd` 短名**：gRPC 的 delegating-resolver 不会把
@@ -226,13 +226,39 @@ lifecycle:
       command: [/bin/bash, -c, |
         set +e
         P=/etc/squid-ca/squid-ca.pem
-        if [ -f "$P" ]; then
+        # 有效性检查：非空 + 首行为 PEM 头（防 secret 半截同步把坏文件塞进信任库）
+        if [ -s "$P" ] && head -1 "$P" | grep -q "BEGIN CERTIFICATE"; then
           if [ -d /etc/pki/ca-trust/source/anchors ]; then      # RHEL/openEuler
             cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
-            update-ca-trust extract >/dev/null 2>&1
-          else                                                   # Debian/Ubuntu
+            update-ca-trust extract >/dev/null 2>&1 && echo "squid CA: injected via update-ca-trust"
+          else
+            # Debian/Ubuntu/Alpine（已带 ca-certificates 包）：三系行为兼容，
+            # 都扫 /usr/local/share/ca-certificates/（Alpine 默认无此目录，先建）
+            mkdir -p /usr/local/share/ca-certificates
             cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
-            update-ca-certificates -f >/dev/null 2>&1
+            if command -v update-ca-certificates >/dev/null 2>&1; then
+              update-ca-certificates -f >/dev/null 2>&1 && echo "squid CA: injected via update-ca-certificates"
+            fi
+          fi
+          # 兜底：两个 update 工具都不在（Alpine 未装 ca-certificates / 极小镜像）。
+          # 运行时绝不装包（apk add 走 HTTPS 会陷入"装 CA 需要先信任 CA"死循环，
+          # 且引入网络依赖）→ 纯文件操作直接写 bundle：
+          # Alpine 系工具读 /etc/ssl/cert.pem，Debian 系读 /etc/ssl/certs/ca-certificates.crt
+          if ! command -v update-ca-certificates >/dev/null 2>&1 \
+             && ! command -v update-ca-trust >/dev/null 2>&1; then
+            # PEM 第二行 base64（去 CR）作去重标记；为空必须跳过——grep -qF "" 会匹配一切
+            MARK=$(sed -n '2p' "$P" | tr -d '\r')
+            if [ -n "$MARK" ]; then
+              for f in /etc/ssl/cert.pem /etc/ssl/certs/ca-certificates.crt; do
+                if [ ! -f "$f" ]; then
+                  mkdir -p "$(dirname "$f")"
+                  cat "$P" > "$f" 2>/dev/null
+                elif [ -w "$f" ] && ! grep -qFx -- "$MARK" "$f" 2>/dev/null; then
+                  cat "$P" >> "$f" 2>/dev/null
+                fi
+              done
+              echo "squid CA: injected via raw bundle append"
+            fi
           fi
         fi
         if command -v apt-get >/dev/null 2>&1 && [ -n "$HTTPS_PROXY" ]; then
@@ -246,8 +272,11 @@ lifecycle:
 
 要点：
 - **分支处理**：RHEL 系 `update-ca-trust extract`，Debian 系 `update-ca-certificates`；两边都幂等、失败不致命（`set +e`）。
+- **Alpine**：未装 `ca-certificates` 包时没有 update 工具、也没有 `/usr/local/share/ca-certificates/` 目录 → 走兜底分支直接写 bundle。**不要在 hook 里 `apk add`**：安装要走 HTTPS 代理，而此刻 squid 的 MITM CA 还没被信任，直接死循环；且运行时装包引入网络依赖。
+- **兜底幂等性**：用 PEM 第二行 base64 做整行去重标记（`grep -qFx`，`-x` 防子串误匹配；`tr -d '\r'` 防 CRLF 行尾匹配不上导致无限追加）；MARK 为空时跳过（空串 grep 匹配一切）。无 bundle 的极小镜像创建只含 squid CA 的 bundle——CI 场景其余公网信任本就由 squid 代理链提供。
 - apt 单独走 apt.conf（apt 不完全跟随 `HTTP_PROXY` 环境变量）。
 - 依赖 `HTTPS_PROXY` 才写 apt 配置 → direct 对比测试自动跳过（见 tool 的 direct 变体生成）。
+- 每条注入路径 echo 一行标记，pod 日志可直接判断走了哪个分支。
 
 ### 2.5 Bazel 专项（JVM trust store）
 
