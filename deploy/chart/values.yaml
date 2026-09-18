@@ -53,7 +53,7 @@ squid:
   # 选路不改 URL：squid 按目标域把请求原样转发给 peer（origin-form + 原 Host），
   # 缓存键不变——从机制上避开 url_rewrite 在 ssl-bump 下的连接复用缺陷
   # （见 redirect/gh-proxy/JUDGEMENT.md 修订⑥、redirect/cachepeer/TEST-WORKFLOW.md）。
-  # ⚠️ 前提：client-first bump（chart 0.1.14）。server-first（peek→bump）下 https GET 被
+  # ⚠️ 前提：client-first bump（2026-09-15 方案A）。server-first（peek→bump）下 https GET 被
   # PINNED 到 origin 连接、选路跳过全部 peer，且 never_direct 会把 pinned 直连拦成必然 503
   # （cachepeer/JUDGEMENT.md 修订①）——client-first 化解此约束后 https 域才可配 peer。
   # originserver：peer 为 origin 形态 nginx，强制 origin-form 转发（absolute-form https
@@ -74,7 +74,7 @@ squid:
     # - name: go-peer
     #   port: 8084
     #   domains: ".proxy.golang.org"
-  # url_rewrite 透明重写（chart 0.1.15 转正，详见 redirect/gh-proxy/clientfirst-rewrite/TEST-WORKFLOW.md）
+  # url_rewrite 透明重写（2026-09-15 转正，详见 redirect/gh-proxy/clientfirst-rewrite/TEST-WORKFLOW.md）
   # client-first bump 下 https 重写复活（无 PINNED，修订⑥需限定 server-first）；helper 由
   # squid-rewrite-helper CM 提供。被重写域的 cache_peer 永不命中，勿与 cachePeer 同域配置。
   urlRewrite:
@@ -100,7 +100,7 @@ registryProxy:
   enabled: true
   # 域名白名单（空格分隔）：同时作为 rpardini 代理/缓存清单 和 squid.conf `acl registry` 的输入。
   # 增删域名只改这里即可，无需 bump chart 版本。
-  registries: "swr.cn-north-4.myhuaweicloud.com swr.cn-southwest-2.myhuaweicloud.com swr.cn-north-12.myhuaweicloud.com registry.k8s.io ghcr.io gcr.io quay.io"
+  registries: "harbor-portal.test.osinfra.cn harbor-portal.osinfra.cn swr.cn-south-1.myhuaweicloud.com swr.cn-north-4.myhuaweicloud.com swr.cn-southwest-2.myhuaweicloud.com swr.cn-north-12.myhuaweicloud.com registry.k8s.io ghcr.io gcr.io quay.io"
   enableManifestCache: "false"
   cacheMaxSize: "100g"
   allowPush: "true"

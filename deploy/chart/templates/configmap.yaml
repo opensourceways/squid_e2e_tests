@@ -65,7 +65,7 @@ data:
     {{- end }}
     {{- end }}
 
-    # ── §4.5 url_rewrite（client-first 下 https 域透明重写，chart 0.1.15 转正）──
+    # ── §4.5 url_rewrite（client-first 下 https 域透明重写，2026-09-15 转正）──
     # helper 见本 CM 末尾 rewrite-helper.sh（values squid.urlRewrite）。重写发生在 peer_select
     # 之前：被重写域（pypi/go/apt/github archive）的 cache_peer 永不命中，勿同时配置。
     # helper 失败语义：全灭 1s 内自动重生、期间原样放行（P5 破坏性实测零 5xx）。
@@ -105,19 +105,21 @@ data:
     refresh_pattern -i \.(pth|pt|safetensors)$ 0 20% 4320
     refresh_pattern -i codeload\.github\.com/.*/refs/heads/ 0 20% 4320
     refresh_pattern -i codeload\.github\.com/.*/refs/tags/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
+    # github.com 原始 host 规则同时命中两类键（无锚点子串匹配）：
+    #   ① 重写键（client-first + url_rewrite，2026-09-15 转正）：gh-proxy 前缀 URL 内嵌
+    #      原始 github.com URL 全文，github.com/.../ 子串在重写键中依然存在——无需
+    #      gh-proxy 前缀版规则（曾经的 ghProxyHost 前缀写法对 releases 是死代码：
+    #      本条更靠前、首匹配生效，archive/releases 两类都由本条接管）；
+    #   ② 降级键：helper 全灭 1s 自愈窗口流量原样放行，键=原始 URL，同一规则兜底。
+    # tags=immutable 长缓存；heads/分支可变走上方 codeload 短 TTL 对应逻辑。
+    refresh_pattern -i github\.com/.*/archive/refs/tags/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
     refresh_pattern -i github\.com/.*/releases/download/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
-    # gh-proxy 前缀重写后的确定性 URL（client-first + url_rewrite，chart 0.1.15 转正）：
-    # archive/refs/tags immutable 长缓存；releases 为确定性 URL（gh-proxy 服务端消化 302/签名）。
-    # 键为 gh-proxy URL——url_rewrite 发生在选路/缓存查找前，原 github.com/codeload 规则不再命中
-    # host 与 helper（squid.urlRewrite.ghProxyHost）同源，此处转义 . 后内联
-    refresh_pattern -i {{ .Values.squid.urlRewrite.ghProxyHost | replace "." "\\." }}/https://github\.com/.*/archive/refs/tags/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
-    refresh_pattern -i {{ .Values.squid.urlRewrite.ghProxyHost | replace "." "\\." }}/https://github\.com/.*/releases/download/ 10080 100% 525600 ignore-reload override-expire ignore-no-store
     # 索引/元数据（20% 老化匹配同步频率）
     refresh_pattern -i repo\.huaweicloud\.com/.*/simple/ 0 20% 4320 ignore-private ignore-reload
     # 纯 rewrite 键漂移配套（redirect/gh-proxy/clientfirst-rewrite）：apt 域经 helper
     # host-swap 后键=huaweicloud，原 .ubuntu.com 规则不再命中——补同参数规则
     refresh_pattern -i repo\.huaweicloud\.com/(ubuntu|ubuntu-ports)/ 0 20% 4320 ignore-private
-    # tuna 不再是 pypi 重写目标（0.1.16 起 pypi→huaweicloud），但客户端显式 -i tuna 直连
+    # tuna 不再是 pypi 重写目标（2026-09-16 起 pypi→huaweicloud），但客户端显式 -i tuna 直连
     # 的流量不经 helper，键仍为 tuna——保留兜底，避免落到 catch-all 逐次回源
     refresh_pattern -i mirrors\.tuna\.tsinghua\.edu\.cn/.*/simple/ 0 20% 4320 ignore-private ignore-reload
     refresh_pattern -i \.pypi\.org/.* 0 20% 4320 ignore-private
@@ -161,10 +163,13 @@ data:
 
   # ── url_rewrite helper（与 squid.conf 同 CM：helper 规则与上方 refresh_pattern 键强耦合，
   #    必须同步滚动；STS 从同一 squid-config volume 以 subPath 再挂 /etc/squid/rewrite-helper.sh）──
-  {{- if .Values.squid.urlRewrite.enabled }}
+  # ⚠️ 本键恒在、不受 urlRewrite.enabled 门控（2026-09-17 false 分支事故）：enabled 只控
+  #    squid.conf 里的 url_rewrite_program 行。若连键一起摘，live Pod 的 subPath 挂载会
+  #    FailedMount（config references non-existent key），且与 STS 缩减挂载的三方合并
+  #    FailedCreate 互相锁死。enabled=false 时文件仍在但 squid 不加载它，无害。
   rewrite-helper.sh: |
     #!/bin/sh
-    # squid url_rewrite helper（client-first bump 下 https 域透明重写，chart 0.1.15 转正）
+    # squid url_rewrite helper（client-first bump 下 https 域透明重写，2026-09-15 转正）
     # 机制（详见 redirect/gh-proxy/clientfirst-rewrite/TEST-WORKFLOW.md）：
     #   client-first bump 在 step1 直接决策不连 origin → bump 后 GET 无 pinned 连接 →
     #   重写后按新目的地新建 TLS 连接 → server-first 时代 301/421（PINNED 复用）结构性
@@ -194,8 +199,10 @@ data:
     #   8. cargo → rsproxy：index.crates.io→rsproxy/index（sparse index 可达），其 config.json
     #      的 dl 指回 rsproxy/crates → tarball 随之透明；static.crates.io/crates 兜底显式请求；
     #      .crate$ 长缓存规则已有
-    #   9. conda → tuna：conda.anaconda.org→anaconda/cloud/<ch>、repo.anaconda.com/pkgs|
-    #      miniconda→anaconda/（结构与 tuna 完全同构）
+    #   9. conda → nju：conda.anaconda.org→anaconda/cloud/<ch>、repo.anaconda.com/pkgs|
+    #      miniconda→anaconda/（结构与 tuna 完全同构）。2026-09-16 由 tuna 换 nju：
+    #      实测 nju 22~26MB/s vs tuna 2.5~4.8MB/s（6~7 倍差，tuna 链路拥堵抖动，
+    #      曾现 271KB/s 回源事件，见 redirect/no-mirror-test/REPORT.md）
     #  10. openEuler yum → 华为云 host 交换（路径同构；.rpm immutable 长缓存见上方）
     #  11. pytorch / openmmlab / OBS / api.github.com 等官方源不重写（官方可达或无同构镜像）
     #  12. 白名单外原样放行（OK）；helper 全灭时 squid 1s 内重生、期间原样放行（P5 实测零失败）
@@ -226,13 +233,12 @@ data:
         https://static.crates.io/crates/*)
           echo "OK rewrite-url=\"https://rsproxy.cn/crates/${url#https://static.crates.io/crates/}\"" ;;
         https://conda.anaconda.org/*)
-          echo "OK rewrite-url=\"https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/${url#https://conda.anaconda.org/}\"" ;;
+          echo "OK rewrite-url=\"https://mirror.nju.edu.cn/anaconda/cloud/${url#https://conda.anaconda.org/}\"" ;;
         https://repo.anaconda.com/pkgs/*|https://repo.anaconda.com/miniconda/*)
-          echo "OK rewrite-url=\"https://mirrors.tuna.tsinghua.edu.cn/anaconda/${url#https://repo.anaconda.com/}\"" ;;
+          echo "OK rewrite-url=\"https://mirror.nju.edu.cn/anaconda/${url#https://repo.anaconda.com/}\"" ;;
         *://repo.openeuler.org/*)
           echo "OK rewrite-url=\"${url%%://*}://mirrors.huaweicloud.com/openeuler/${url#*repo.openeuler.org/}\"" ;;
         *)
           echo "OK" ;;
       esac
     done
-  {{- end }}

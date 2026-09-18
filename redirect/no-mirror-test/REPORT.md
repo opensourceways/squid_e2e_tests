@@ -1,64 +1,104 @@
-# no-mirror-test 全量报告（2026-09-15，gy-006）
+# no-mirror-test 全量回归报告（squid v7.7.2 AKI 补丁版）
 
-**目标**：验证「客户端零镜像配置 + squid url_rewrite 透明重写」端到端成立。
-14 个 CI 工具 e2e 用例全部剥掉客户端镜像配置、改回官方默认源，由 squid（client-first bump + url_rewrite helper）在服务端透明重写加速。
+- **日期**：2026-09-16
+- **集群**：gy-006（openmerlin-guiyang-006），namespace `squid`
+- **被测版本**：
+  - chart `version: 0.1.11`（产品定版；注释中"chart 0.1.13/0.1.14/0.1.15"为测试期配置状态叙事代号，2026-09-16 回归 Chart.yaml 到产品版本，未落入 Chart.yaml）
+  - squid 镜像 `v7.7.2`（自建，含 gadgets.cc AKI 补丁，见 `redirect/squid-aki-test/PLAN.md`）
+  - CM（squid-config）在本 chart 模板之上叠加当日内容微调（2026-09-16，按"配置微调不 bump"约定 chart 版本未动）：conda 重写目标 tuna→nju、github release/archive refresh_pattern 合并为原始 host 规则
+- **执行方式**：`./run-all.sh`（Volcano Job 串行下发，轮询 Pod phase，日志落 `/tmp/no-mirror-rerun.log`）
+- **结论**：**14/14 全部 Succeeded**，零客户端配置（zero client config）下重写链路 + 缓存 + AKI 补丁全部验证通过
 
-**本轮结果：11 通过 / 2 失败（根因均已定位，与重写链路无关）/ 1 移除（不在重写范围）**
+## 一、总体结果
 
-> 本轮跑在 chart 0.1.11 helper 上；下文"修复"一节含 0.1.12 已改待部署内容。
+| 用例 | Job | 结果 | 耗时 | 关键证据 |
+|---|---|---|---|---|
+| tool-01 pip | test-squid-pip-cnj2v | ✅ | 75.5s | 官方 index 安装 requests/pyyaml/pytest 全过；torch wheel 146MB HTTP=200 |
+| tool-02 apt | test-squid-apt-drwjf | ✅ | 12.0s | `apt-get update` 4s，官方 ports.ubuntu.com URI 经重写生效 |
+| tool-03 github | test-squid-github-npch6 | ✅ | 9.7s | git clone 完成（raw/archive→gh-proxy） |
+| tool-04 goproxy | test-squid-goproxy-ndtzh | ✅ | 34.5s | go module 经 proxy.golang.org→goproxy.cn |
+| tool-06 wget | test-squid-wget-sd6rh | ✅ | 1.4s | wget 大文件下载 |
+| tool-07 cmake fetchcontent | test-squid-cmake-pq4ll | ✅ | 75.1s | googletest 拉取+构建+测试通过 |
+| tool-08 bazel | test-squid-bazel-9785k | ✅ | 27.3s | http_archive 拉取+构建通过（JVM truststore 注入） |
+| tool-09 npm | test-squid-npm-542d5 | ✅ | 4.9s | express 装载成功（registry.npmjs.org→npmmirror） |
+| tool-10 cargo | test-squid-cargo-gtrct | ✅ | 11.3s | crate 拉取+构建成功（→rsproxy） |
+| tool-11 conda | test-squid-conda-rwtsf | ✅ | 808.1s* | **numpy 2.4.6 works through squid**（AKI 补丁核心验证项） |
+| tool-12 uv | test-squid-uv-7cqfx | ✅ | 9.0s | uv 安装 Python 成功 |
+| tool-14 git-lfs | test-squid-gitlfs-j7krc | ✅ | 3.2s | LFS 对象经代理下载 |
+| tool-15 pnpm | test-squid-pnpm-t7b8f | ✅ | 14.4s | pnpm 安装 express 成功 |
+| tool-16 yum | test-squid-yum-xrshk | ✅ | 41.7s | openEuler RPM 经 host 交换→华为云 |
 
-## 总览
+\* tool-11 本次 808s 中含约 725s 的 Miniconda 安装包回源慢速事件（见第三节），换源后复测仅 78s。
 
-| # | 用例 | 官方源 → 重写目标 | 结果 | 耗时 | 说明 |
-|---|---|---|---|---|---|
-| 01 | pip | pypi.org → huaweicloud pypi | ✅ | 82.4s | 含 torch 146MB 对象 + vllm requirements 批量下载 |
-| 02 | apt | ports.ubuntu.com → huaweicloud | ✅ | 8.2s | apt-get update 2s |
-| 03 | git clone | github.com（CONNECT 隧道，不重写） | ✅ | 4.7s | clone 直连官方 |
-| 04 | go mod | proxy.golang.org → goproxy.cn | ❌ | — | go1.22 工具链解析缺陷（见下） |
-| 05 | obs | —（已移除） | ➖ | — | obs-community 不在重写范围，测的是 AK/SK 凭证（403 InvalidAccessKeyId），与套件目标无关，用户拍板移除 |
-| 06 | wget | download.openmmlab.com（官方直连） | ✅ | 0.6s | 白名单外原样放行不误伤 |
-| 07 | cmake | github clone（不重写） | ✅ | 26.1s | googletest FetchContent 拉取+构建+测试通过 |
-| 08 | bazel | github archive → gh-proxy | ✅ | 27.8s | WORKSPACE 全官方 URL，重写透明生效 |
-| 09 | npm | registry.npmjs.org → npmmirror | ✅ | 5.7s | host 交换同构 |
-| 10 | cargo | index.crates.io/static.crates.io → rsproxy | ✅ | 11.2s | sparse index + tarball 两端点 |
-| 11 | conda | conda.anaconda.org/repo.anaconda.com → tuna | ❌ | — | squid 伪造证书缺 AKI，conda 26 严格 TLS 拒签（见下） |
-| 12 | uv | pypi.org → huaweicloud | ✅ | 5.2s | |
-| 14 | git-lfs | github releases → gh-proxy | ✅ | 4.1s | release 二进制 + LFS 对象 |
-| 15 | pnpm | registry.npmjs.org → npmmirror | ✅ | 6.4s | |
-| 16 | yum | repo.openeuler.org → huaweicloud | ✅ | 56.3s | 官方 repo + metalink |
+## 二、AKI 补丁验证（本轮核心目标）
 
-（13-huggingface、17-docker-pull 按需求排除，见 TEST-WORKFLOW.md）
+- client-first bump 伪造证书缺 AKI 导致 Python 3.13+/conda 26 strict 校验拒签的问题已由 v7.7.2 补丁解决；
+- tool-11-conda（conda 26 装numpy，Python 3.13+ 客户端）由 FAIL 翻绿；
+- 客户端版本矩阵（openssl strict / Python 3.10–3.14 / node 24 / go / rustls）另见 `redirect/AKItest/RESULTS.md`，14/14 全 PASS。
 
-## 两个失败的确证根因（均非重写链路问题）
+## 三、过程中的两个事件与处置
 
-### ① tool-04 goproxy：go 1.22 的 GOTOOLCHAIN 解析缺陷
+### 事件 1：tool-01-pip 首跑偶发失败（非 squid 问题）
 
-- 链路本身已实测通：access.log 实锤 `CONNECT proxy.golang.org` → bump → 重写 `goproxy.cn/golang.org/toolchain/...`，重写正确。
-- 失败点：mind-cluster go.mod 要求 `go 1.26`，apt 的 golang-go **1.22.2** 对其请求**字面版本** `v0.0.1-go1.26.linux-arm64` → goproxy.cn 404。
-- 探测实锤（goproxy.cn）：`v0.0.1-go1.26.linux-arm64` = **404（该 tag 上游不存在）**；`v0.0.1-go1.26.0.linux-arm64` = **200**；list 中 go1.26.0 全平台齐全。
-- 结论：1.21 起 Go 发布版均为 X.Y.0，老 go 请求不存在的 `go1.26` 字面版本是老版 go 已知缺陷，任何 GOPROXY 都过不了这一步。
-- **修复（已完成，待重跑）**：tool-04 改用官方 `https://go.dev/dl/go1.26.0.linux-arm64.tar.gz` 安装工具链；chart 0.1.12 helper 新增规则：`go.dev/dl/*`、`dl.google.com/go/*` → `mirrors.aliyun.com/golang/<file>`（路径同构、文件名唯一），配 immutable refresh_pattern。
+- 现象：`test-squid-pip-wcbwv` 存活 65s，exit 1，日志在 bulk pip download 处戛然而止。
+- 根因：首次 `pip download` 碰到**瞬时网络错误**（非包解析类），诊断分支 `BAD=$(grep -oE "requirement ..." | ... )` 因 `set -e`+`pipefail` 在 grep 无匹配时被静默杀死，真实报错随容器销毁丢失。
+- 处置：[tool-01-pip.yaml](.) 诊断分支补 `|| true`；同 yaml 重跑（cnj2v）75s 全绿，实锤偶发。
 
-### ② tool-11 conda：squid 伪造证书缺 Authority Key Identifier
+### 事件 2：tool-11 Miniconda 安装包回源慢（tuna 链路拥堵）→ 换源 nju
 
-- 链路本身已实测通：miniconda installer 196MB 经 repo.anaconda.com 重写 tuna，17.4s 下载完成。
-- 失败点：conda 26.7.1（Python 3.13 严格 RFC 5280 校验）对 squid sslcrtd 签发的伪造证书报 `Missing Authority Key Identifier`，拒签。
-- openssl 取证实锤：squid 签发的 `CN=conda.anaconda.org` 证书扩展区**只有 SAN，无 AKI/SKI**。
-- 影响面：所有走严格 TLS 校验的客户端（新版 python ssl / conda / 可能的 go 1.26 工具链自身等）都会在 bump 后拒签——是 squid 层真实缺口，不只 conda。
-- **状态：按用户要求暂不修**，留档待定方案（候选：squid 生成证书补 AKI 扩展 / conda 域 splice 放行 / 客户端 ssl_verify 关闭）。
+access.log 实测同一 URL（经重写落 tuna）三次下载：
 
-## 修复状态
+| 时间 | 副本 | 缓存状态 | 耗时 | 吞吐 |
+|---|---|---|---|---|
+| 14:41 | squid-cache-1 | TCP_MISS | 20.7s | 9.5 MB/s |
+| 15:54 | squid-cache-1 | TCP_REFRESH_UNMODIFIED | 6s | 读盘级 |
+| 16:37 | squid-cache-0 | TCP_MISS | **725s** | **271 KB/s** |
 
-| 项 | 状态 |
-|---|---|
-| tool-04 改官方 go.dev/dl 安装 | ✅ 文件已改 |
-| chart 0.1.12：helper 规则 5b（go.dev/dl、dl.google.com/go → aliyun golang）+ refresh_pattern | ✅ 已改，helm template 校验通过，**待 helm upgrade + rollout restart** |
-| tool-05-obs 移除 + TEST-WORKFLOW 同步（15→14） | ✅ |
-| conda AKI 证书缺口 | ⏸ 按用户要求暂不修，已留档 |
-| 全量重跑（部署 0.1.12 后，重点 tool-04 / tool-11） | ⏳ 待部署后执行 |
+- 双副本独立缓存 + Service 轮询导致本次落在无缓存的 squid-cache-0 → 必然 MISS，而 tuna 回源链路正处拥堵窗口。
+- **A/B 实测**（20MB 分段、随机 query 绕缓存、走 squid 回源，各 2 轮）：
+  - tuna：2.5 / 4.8 MB/s
+  - **nju（mirror.nju.edu.cn）：25.9 / 22.6 MB/s（6~7 倍）**
+- nju 与 tuna 目录完全同构（`/anaconda/cloud/<ch>`、`/anaconda/pkgs/`、`/anaconda/miniconda/`），helper 两条 conda 规则仅换 host。
+- **处置**：chart configmap 模板 conda 重写目标 tuna→nju（含注释留档）；`helm template + kubectl apply` squid-config CM；`rollout restart sts/squid-cache`（2/2 ready）。
+- **复测**（test-squid-conda-fhd8n）：安装包下载 **9.8s（196MB，≈20 MB/s）**，场景总耗时 78s，numpy 2.4.6 安装成功；access.log 落点实锤：
+  `TCP_MISS/200 196163320 GET https://mirror.nju.edu.cn/anaconda/miniconda/... - HIER_DIRECT/210.28.130.3`
 
-## 方法论留档
+## 四、gy-005 部署与全量回归（2026-09-16 同日）
 
-- 运行方法：TEST-WORKFLOW.md §4.1（一键循环，逐 job 等待 + 摘要）
-- 失败取证三板斧：pod 日志 → squid access.log（HIER_DIRECT 落点/状态码）→ 探针直测上游（goproxy.cn 版本探测、openssl 证书检查）
-- 每个用例的剥离清单见 TEST-WORKFLOW.md §3
+- **部署**：`helm upgrade squid ./chart -f values-gy-005.yaml --kubeconfig ~/.kube/gy-005.yaml`（REVISION 5）。
+  values 更新：镜像 `v7.7.2`（AKI 补丁版，`imagePullPolicy: Always`）+ `urlRewrite.enabled: true`（纯 rewrite 架构对齐 gy-006）。
+  gy-005 原跑 v7.7.1、无重写（首建 2026-09-12，values 文件头部"全新部署"注释已过时并修正）。
+- **端口分工注意**：squid 监听 **3129**（ssl-bump），rpardini nginx 占 3128（仅作 squid 的 registry cache_peer）；
+  Service 3128→targetPort 3129，外部客户端走 Service 无感。Pod 内 sanity check 必须打 3129，打 3128 会绕过 squid。
+- **结果：14/14 全部 Succeeded，总耗时约 10 分钟**（`KC=~/.kube/gy-005.yaml LOG=/tmp/no-mirror-rerun-005.log ./run-all.sh`）：
+
+| 用例 | Job | 耗时 | 要点 |
+|---|---|---|---|
+| tool-01 pip | test-squid-pip-8gdr6 | 87.9s | 194MB torch whl 下载+安装 |
+| tool-02 apt | test-squid-apt-gwdnn | 10.0s | update 2s |
+| tool-03 github | test-squid-github-4tq7b | 9.0s | git clone |
+| tool-04 goproxy | test-squid-goproxy-9sxzp | 15.1s | go 模块 |
+| tool-06 wget | test-squid-wget-hgjw4 | 4.0s | github 包下载 |
+| tool-07 cmake | test-squid-cmake-6m77m | 22.5s | googletest fetch+build |
+| tool-08 bazel | test-squid-bazel-8vk4z | 20.1s | http_archive + test |
+| tool-09 npm | test-squid-npm-h5brv | 10.1s | express |
+| tool-10 cargo | test-squid-cargo-22d9k | 8.7s | fetch+build |
+| tool-11 conda | test-squid-conda-svlg2 | **43.9s** | **nju 重写直接生效**（对比 006 tuna 时代分钟级），numpy 2.4.6 |
+| tool-12 uv | test-squid-uv-jf9ds | 5.0s | uv |
+| tool-14 git-lfs | test-squid-gitlfs-lb8xk | 5.2s | lfs objects |
+| tool-15 pnpm | test-squid-pnpm-fgm57 | 8.2s | pnpm express |
+| tool-16 yum | test-squid-yum-zdtj8 | 35.7s | yum 全套 |
+
+- 结论：纯 rewrite 架构 + AKI 补丁版在 gy-005 一次部署即全绿，零客户端配置。
+
+## 五、复现方式
+
+```bash
+cd redirect/no-mirror-test
+./run-all.sh          # 默认 gy-006；退出码 0=全过；明细日志 /tmp/no-mirror-rerun.log
+# 其他集群用 KC/LOG 覆写：
+KC=~/.kube/gy-005.yaml LOG=/tmp/no-mirror-rerun-005.log ./run-all.sh
+```
+
+- 单用例：`kubectl --kubeconfig ~/.kube/gy-006.yaml create -f tool-11-conda.yaml -o name` 后轮询 Pod phase。
+- 注意：Volcano Job `get jobs` 不可见、condition 名为 `Completed`，勿用 `kubectl wait --for=condition=complete`（run-all.sh 已规避，踩坑史见脚本头注释）。

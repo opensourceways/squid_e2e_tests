@@ -138,16 +138,6 @@ spec:
         - name: huawei-swr-image-pull-secret-model-gy
         nodeSelector:
           kubernetes.io/arch: arm64
-        # gy-006 2026-09-15：节点 172.22.6.177 的 containerd 不信任 harbor-portal.test 域证书
-        # （x509 unknown authority，其他节点已配 CA），调度规避之
-        affinity:
-          nodeAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: kubernetes.io/hostname
-                  operator: NotIn
-                  values: ["172.22.6.177"]
         restartPolicy: Never
         securityContext:
           runAsUser: 0
@@ -220,16 +210,6 @@ spec:
         - name: huawei-swr-image-pull-secret-model-gy
         nodeSelector:
           kubernetes.io/arch: arm64
-        # gy-006 2026-09-15：节点 172.22.6.177 的 containerd 不信任 harbor-portal.test 域证书
-        # （x509 unknown authority，其他节点已配 CA），调度规避之
-        affinity:
-          nodeAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: kubernetes.io/hostname
-                  operator: NotIn
-                  values: ["172.22.6.177"]
         restartPolicy: Never
         securityContext:
           runAsUser: 0
@@ -337,16 +317,6 @@ spec:
         - name: huawei-swr-image-pull-secret-model-gy
         nodeSelector:
           kubernetes.io/arch: arm64
-        # gy-006 2026-09-15：节点 172.22.6.177 的 containerd 不信任 harbor-portal.test 域证书
-        # （x509 unknown authority，其他节点已配 CA），调度规避之
-        affinity:
-          nodeAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              nodeSelectorTerms:
-              - matchExpressions:
-                - key: kubernetes.io/hostname
-                  operator: NotIn
-                  values: ["172.22.6.177"]
         restartPolicy: Never
         securityContext:
           runAsUser: 0

@@ -1,0 +1,157 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: test-aki-rustls-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-aki-rustls
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 1800
+  tasks:
+    - name: test-aki-rustls
+      replicas: 1
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+              command:
+                - bash
+                - -c
+              args:
+                - |
+                  #!/bin/bash
+                  # AKI rustls 单项重跑（第 6 轮 rustls 步编译失败+假 PASS 的修复验证）
+                  # 修复点：① Ok(())→Ok(_) 适配 WebPkiServerVerifier 真实签名
+                  #         ② 先 cargo build 成功、再跑二进制、精确匹配输出，杜绝
+                  #            rustc 回显源码行污染 grep 导致的假 PASS
+                  export HOME=/root
+                  export DEBIAN_FRONTEND=noninteractive
+                  export http_proxy=http://squid-cache:3128 https_proxy=http://squid-cache:3128
+                  export no_proxy=localhost,127.0.0.1
+                  mkdir -p /tmp/akit && cd /tmp/akit
+                  step(){ echo; echo "=== $* ==="; }
+
+                  step "1/4 apt 工具 + CA 注入"
+                  apt-get update -qq >/dev/null
+                  apt-get install -y -qq openssl curl ca-certificates build-essential cmake pkg-config >/dev/null
+                  P=/etc/squid-ca/squid-ca.pem
+                  if [ -f "$P" ]; then
+                    cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                    update-ca-certificates -f >/dev/null 2>&1
+                  fi
+
+                  step "2/4 活体取证：抓 bump 链（v7.7.2 补丁版 squid）"
+                  echo | openssl s_client -proxy squid-cache:3128 -connect conda.anaconda.org:443 \
+                    -servername conda.anaconda.org -showcerts 2>/dev/null > chain.pem
+                  awk '/-----BEGIN/{c++} c==1{print} /-----END/&&c==1{exit}' chain.pem > leaf.pem
+                  awk '/-----BEGIN/{c++} c==2{print} /-----END/&&c==2{exit}' chain.pem > ca.pem
+                  openssl x509 -in leaf.pem -noout -subject
+                  echo "leaf AKI 扩展数: $(openssl x509 -in leaf.pem -noout -text | grep -c 'Authority Key') (v7.7.2 补丁后应为 1)"
+                  if [ "$P" ] && [ -f "$P" ]; then
+                    FP1=$(openssl x509 -in ca.pem -noout -fingerprint -sha256)
+                    FP2=$(openssl x509 -in "$P" -noout -fingerprint -sha256)
+                    [ "$FP1" = "$FP2" ] && echo "CA 指纹一致" || { echo "CA 不一致，以挂载 secret 覆盖"; cp "$P" ca.pem; }
+                  fi
+
+                  step "3/4 rust stable（rustup）"
+                  for i in 1 2 3 4 5; do
+                    curl -sSf https://static.rust-lang.org/rustup/dist/aarch64-unknown-linux-gnu/rustup-init -o rustup-init && break
+                    sleep 5
+                  done
+                  chmod +x rustup-init && ./rustup-init -y --profile minimal >/dev/null 2>&1
+                  export PATH=$HOME/.cargo/bin:$PATH
+                  rustc --version
+                  cargo new aki_rust >/dev/null 2>&1 && cd aki_rust
+                  cargo add rustls rustls-pki-types 2>&1 | tail -3
+                  mkdir -p src && cat > src/main.rs <<'RSEOF'
+                  use rustls::client::WebPkiServerVerifier;
+                  use rustls::client::danger::ServerCertVerifier;
+                  use rustls_pki_types::{pem::PemObject, CertificateDer, ServerName, UnixTime};
+                  use std::time::{SystemTime, UNIX_EPOCH};
+                  fn main(){
+                    // 二进制在 aki_rust/ 下运行，证书在 /tmp/akit/ —— 用绝对路径
+                    let ca:Vec<CertificateDer>=CertificateDer::pem_file_iter("/tmp/akit/ca.pem").unwrap()
+                      .collect::<Result<_,_>>().unwrap();
+                    let mut roots=rustls::RootCertStore::empty();
+                    roots.add_parsable_certificates(ca);
+                    let v=WebPkiServerVerifier::builder(std::sync::Arc::new(roots)).build().unwrap();
+                    let leaf=CertificateDer::from_pem_file("/tmp/akit/leaf.pem").unwrap();
+                    let name=ServerName::try_from("conda.anaconda.org".to_string()).unwrap();
+                    let dur=SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+                    let now=UnixTime::since_unix_epoch(dur);
+                    match v.verify_server_cert(&leaf,&[],&name,&[],now){
+                      Ok(_approved)=>println!("RESULT rustls PASS"),
+                      Err(e)=>println!("RESULT rustls FAIL {}",e),
+                    }
+                  }
+                  RSEOF
+
+                  step "4/4 编译+运行+判定（先 build 成功再跑，杜绝假 PASS）"
+                  if cargo build --quiet 2>/dev/null; then
+                    RSOUT=$(./target/debug/aki_rust 2>&1); echo "$RSOUT"
+                    case "$RSOUT" in *"RESULT rustls PASS"*) echo "CASE rustls-$(cargo pkgid rustls 2>/dev/null | cut -d# -f2) PASS";; *) echo "CASE rustls-latest FAIL ($RSOUT)"; exit 1;; esac
+                  else
+                    echo "cargo build FAILED:"; cargo build 2>&1 | tail -20
+                    echo "CASE rustls-latest FAIL (compile error)"; exit 1
+                  fi
+                  echo "✅ rustls case completed."
+              workingDir: /workspace
+              resources:
+                limits:
+                  cpu: "4"
+                  memory: 6Gi
+                requests:
+                  cpu: "2"
+                  memory: 4Gi
+              env:
+                - name: HTTP_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: HTTPS_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: http_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: https_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: NO_PROXY
+                  value: "0.0.0.0,localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+                - name: no_proxy
+                  value: "0.0.0.0,localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+                - name: SSL_CERT_FILE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: CURL_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: REQUESTS_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: NODE_EXTRA_CA_CERTS
+                  value: /etc/squid-ca/squid-ca.pem
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true
+          nodeSelector:
+            kubernetes.io/arch: arm64
+          imagePullSecrets:
+            - name: huawei-swr-image-pull-secret-model-gy
+          activeDeadlineSeconds: 2400
+          securityContext:
+            runAsUser: 0
+          restartPolicy: Never

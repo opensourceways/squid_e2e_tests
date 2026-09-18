@@ -32,7 +32,7 @@ squid:
   # cache-service 8081/8084/8086 端口保留，回切 = values 里重配 cachePeer（chart 默认已内置
   # enabled:false 骨架与 peers 语法示例，历史实测见 redirect/cachepeer/JUDGEMENT.md）
 
-  # 纯 rewrite 架构（chart 0.1.15 转正，8 用例实测全绿见 redirect/test/）：
+  # 纯 rewrite 架构（2026-09-15 转正，8 用例实测全绿见 redirect/test/）：
   #   pypi index→huaweicloud / github archive+releases→gh-proxy / go→goproxy.cn / apt→huaweicloud
   #   registry splice 与白名单外流量原样放行；helper 全灭 1s 自愈、降级直连（P5 实测）
   urlRewrite:
@@ -41,6 +41,9 @@ squid:
 
 images:
   squid:
+    # AKI 补丁版（gadgets.cc-aki.patch，2026-09-16）：client-first 伪造证书补 AKI，
+    # 修复 Python 3.13+/conda 26 strict 校验拒签，见 redirect/squid-aki-test/PLAN.md
+    tag: "v7.7.2"
     # 自建镜像调试期强制拉取最新，避免命中节点上旧的 v7.7.1 标签镜像
     imagePullPolicy: Always
 

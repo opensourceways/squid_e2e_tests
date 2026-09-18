@@ -80,12 +80,13 @@ spec:
           readOnly: true
         - name: cache
           mountPath: /var/spool/squid
-        {{- if .Values.squid.urlRewrite.enabled }}
+        # helper 挂载恒在（2026-09-17 false 分支事故）：enabled 只控 squid.conf 的
+        # url_rewrite_program 行；若条件化挂载，helm 三方合并缩列表会渲染出空 name
+        # 条目（FailedCreate），与 CM 键摘除（FailedMount）互相锁死
         - name: squid-config
           mountPath: /etc/squid/rewrite-helper.sh
           subPath: rewrite-helper.sh
           readOnly: true
-        {{- end }}
         command:
         - /bin/sh
         - -c
@@ -249,24 +250,15 @@ spec:
           items:
           - key: squid.conf
             path: squid.conf
-          {{- if .Values.squid.urlRewrite.enabled }}
+          # helper 键恒在（与 CM 侧同理由，见 configmap.yaml 注释）
           - key: rewrite-helper.sh
             path: rewrite-helper.sh
-          {{- end }}
       - name: squid-ca
         secret:
           secretName: squid-ca
           items:
           - key: squid-ca-bundle.pem
             path: squid-ca-bundle.pem
-      {{- if .Values.squid.urlRewrite.enabled }}
-      - name: rewrite-helper
-        configMap:
-          name: squid-rewrite-helper
-          items:
-          - key: rewrite-helper.sh
-            path: rewrite-helper.sh
-      {{- end }}
       {{- if .Values.registryProxy.enabled }}
       - name: registry-ca
         emptyDir: {}

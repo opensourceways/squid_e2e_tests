@@ -100,7 +100,9 @@ spec:
                       break
                     fi
                     T1=$(date +%s%3N)
-                    BAD=$(grep -oE "requirement [A-Za-z0-9_.-]+" /tmp/bulkdl.log | awk '{print $2}' | sort -u)
+                    # grep 无匹配退出 1，pipefail+set -e 会静默杀脚本（网络类失败无
+                    # "requirement" 字样时全脚本零输出猝死）——必须 || true 兜底
+                    BAD=$(grep -oE "requirement [A-Za-z0-9_.-]+" /tmp/bulkdl.log | awk '{print $2}' | sort -u || true)
                     if [ -z "$BAD" ]; then
                       echo "bulk download failed, could not identify bad package(s):"
                       tail -15 /tmp/bulkdl.log

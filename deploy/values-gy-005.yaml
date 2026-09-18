@@ -3,8 +3,8 @@
 # 部署方式（ArgoCD 管理，app 定义见 argocd/clusters/gy-005/squid-rpardini.yaml）：
 #   helm install squid ./chart -n squid -f values-gy-005.yaml --kubeconfig ~/.kube/gy-005.yaml
 #
-# gy-005 为全新部署（此前无 squid）；采用新架构：StatefulSet + registry-proxy + exporter，
-# CA 走 Vault secretDefinition（与 gy-001/002/wlcb-001 一致）。
+# gy-005 首建于 2026-09-12（helm release squid，此前注释"全新部署"已过时）；
+# 架构：StatefulSet + registry-proxy + exporter，CA 走 Vault secretDefinition（与 gy-001/002/wlcb-001 一致）。
 #
 # 新 chart 是全新 StatefulSet，volumeClaimTemplates 无历史约束，size 直接生效。
 #
@@ -30,6 +30,20 @@ squid:
     limits:
       cpu: 2
       memory: 4Gi
+  # 纯 rewrite 架构（与 gy-006 对齐，chart CM 内置 helper：pypi→huaweicloud /
+  # github archive+releases→gh-proxy / go→goproxy.cn / conda→mirror.nju.edu.cn /
+  # apt→huaweicloud；registry splice 与白名单外流量原样放行，helper 全灭 1s 自愈降级直连）
+  urlRewrite:
+    enabled: true
+    ghProxyHost: gh-proxy.test.osinfra.cn
+
+images:
+  squid:
+    # AKI 补丁版（gadgets.cc-aki.patch，2026-09-16）：client-first 伪造证书补 AKI，
+    # 修复 Python 3.13+/conda 26 strict 校验拒签，见 redirect/squid-aki-test/PLAN.md
+    tag: "v7.7.2"
+    # 强制拉取最新，避免命中节点上可能存在的旧 v7.7.1 标签镜像
+    imagePullPolicy: Always
 
 registryProxy:
   # registry 域 splice 到同 Pod 的 rpardini sidecar，blob 缓存 150G（PVC 200Gi）

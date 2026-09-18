@@ -38,6 +38,20 @@ squid:
     limits:
       cpu: 2
       memory: 4Gi
+  # 纯 rewrite 架构（2026-09-17 对齐 gy-005/006/002；chart CM 内置 helper：pypi→huaweicloud /
+  # github archive+releases→gh-proxy / go→goproxy.cn / conda→mirror.nju.edu.cn /
+  # apt→huaweicloud；registry splice 与白名单外流量原样放行，helper 全灭 1s 自愈降级直连）
+  urlRewrite:
+    enabled: true
+    ghProxyHost: gh-proxy.test.osinfra.cn
+
+images:
+  squid:
+    # AKI 补丁版（gadgets.cc-aki.patch，2026-09-16）：client-first 伪造证书补 AKI，
+    # 修复 Python 3.13+/conda 26 strict 校验拒签，见 redirect/squid-aki-test/PLAN.md
+    tag: "v7.7.2"
+    # 强制拉取最新，避免命中节点上可能存在的旧 v7.7.1 标签镜像
+    imagePullPolicy: Always
 
 registryProxy:
   proxyReadTimeout: "300s"

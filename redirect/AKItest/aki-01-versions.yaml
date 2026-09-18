@@ -1,0 +1,291 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: test-aki-versions-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-aki-versions
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 3600
+  tasks:
+    - name: test-aki-versions
+      replicas: 1
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+              lifecycle:
+                postStart:
+                  exec:
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set +e
+                        # 标准 squid CA 注入（对齐 tool-08）：系统信任 + apt 走代理
+                        P=/etc/squid-ca/squid-ca.pem
+                        if [ -f "$P" ]; then
+                          cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                          update-ca-certificates -f >/dev/null 2>&1
+                        fi
+                        mkdir -p /etc/apt/apt.conf.d
+                        printf 'Acquire::http::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\nAcquire::https::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\n' > /etc/apt/apt.conf.d/99squid-proxy
+                        exit 0
+              command:
+                - bash
+                - -c
+              args:
+                - |
+                  #!/bin/bash
+                  # AKI 版本矩阵测试（redirect/AKItest/TEST-WORKFLOW.md）
+                  # 同一对证书：squid 活体伪造叶子（无 AKI）+ SquidCacheCA
+                  # 矩阵：openssl 默认/strict、python 3.10-3.14、node 最新 v24、
+                  #       go 1.24(apt)/最新、rustls 最新（WebPkiServerVerifier 直校）
+                  export HOME=/root
+                  export DEBIAN_FRONTEND=noninteractive
+                  export http_proxy=http://squid-cache:3128 https_proxy=http://squid-cache:3128
+                  export no_proxy=localhost,127.0.0.1
+                  mkdir -p /tmp/akit && cd /tmp/akit
+                  RESULTS=/tmp/akit/results.txt
+                  : > "$RESULTS"
+                  START=$(date +%s%N)
+                  step(){ echo; echo "=== $* ==="; }
+                  rec(){ echo "CASE $*" | tee -a "$RESULTS"; }
+
+                  step "0/7 apt 工具"
+                  apt-get update -qq >/dev/null
+                  apt-get install -y -qq openssl curl xz-utils ca-certificates golang-1.24-go nodejs build-essential cmake >/dev/null
+
+                  step "1/7 活体取证：抓 bump 链（leaf=伪造证书 / CA=SquidCacheCA）"
+                  echo | openssl s_client -proxy squid-cache:3128 -connect conda.anaconda.org:443 \
+                    -servername conda.anaconda.org -showcerts 2>/dev/null > chain.pem
+                  awk '/-----BEGIN/{c++} c==1{print} /-----END/&&c==1{exit}' chain.pem > leaf.pem
+                  awk '/-----BEGIN/{c++} c==2{print} /-----END/&&c==2{exit}' chain.pem > ca.pem
+                  openssl x509 -in leaf.pem -noout -subject
+                  echo "leaf AKI 扩展存在数: $(openssl x509 -in leaf.pem -noout -text | grep -c 'Authority Key') (0=缺失,待测前提)"
+                  openssl x509 -in ca.pem -noout -subject
+
+                  step "1b/ CA 注入校验（postStart 已按 tool-08 标准配方注入系统信任 + env 六件套；此处仅核对活体抓取 CA = 挂载 secret）"
+                  FP1=$(openssl x509 -in ca.pem -noout -fingerprint -sha256)
+                  FP2=$(openssl x509 -in /etc/squid-ca/squid-ca.pem -noout -fingerprint -sha256)
+                  echo "$FP1"; echo "$FP2"
+                  if [ "$FP1" = "$FP2" ]; then echo "CA 指纹一致"; else echo "CA 不一致! 以挂载 secret 为准覆盖 ca.pem"; cp /etc/squid-ca/squid-ca.pem ca.pem; fi
+
+                  step "2/7 openssl $(openssl version | awk '{print $2}')：默认 vs strict"
+                  if openssl verify -CAfile ca.pem leaf.pem >/dev/null 2>&1; then rec "openssl-default PASS"; else rec "openssl-default FAIL"; fi
+                  STRICTMSG=$(openssl verify -x509_strict -CAfile ca.pem leaf.pem 2>&1 | tail -1)
+                  if openssl verify -x509_strict -CAfile ca.pem leaf.pem >/dev/null 2>&1; then rec "openssl-strict PASS"; else rec "openssl-strict FAIL ($STRICTMSG)"; fi
+
+                  step "3/7 uv 最新 + python 3.10-3.14（python-build-standalone，走 github→重写 gh-proxy）"
+                  # 下载稳健化（TEST-WORKFLOW.md 运行记录：github 直连 302 跳会抖动 502）
+                  # 策略：下载→tar tzf 校验→失败删档重试，≤5 次
+                  for i in 1 2 3 4 5; do
+                    curl -sSLo uv.tgz https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-unknown-linux-gnu.tar.gz || { rm -f uv.tgz; sleep 5; continue; }
+                    tar tzf uv.tgz >/dev/null 2>&1 && break
+                    rm -f uv.tgz; sleep 5
+                  done
+                  tar xzf uv.tgz && install uv-aarch64-unknown-linux-gnu/uv /usr/local/bin/uv
+                  uv --version
+                  # SSL_CERT_FILE 已由 pod 级 env 注入（uv 的 rustls 读它；见 TEST-WORKFLOW.md 运行记录第 2 轮）
+                  echo "SSL_CERT_FILE=$SSL_CERT_FILE"
+                  uv python install 3.10 3.11 3.12 3.13 3.14 2>&1 | grep -E "Installed|python" | head -8 \
+                    || { sleep 10; uv python install 3.10 3.11 3.12 3.13 3.14 2>&1 | grep -E "Installed|python" | head -8; }
+
+                  cat > aki_check.py <<'PYEOF'
+                  import socket, ssl, sys, os
+                  HOST="squid-cache.squid.svc.cluster.local"; PORT=3128; SNI="conda.anaconda.org"
+                  mode=sys.argv[1]
+                  ctx=ssl.create_default_context(cafile="ca.pem")
+                  strict_on=bool(ctx.verify_flags & getattr(ssl,"VERIFY_X509_STRICT",0))
+                  if mode=="nostrict":
+                      ctx.verify_flags &= ~getattr(ssl,"VERIFY_X509_STRICT",0)
+                  raw=socket.create_connection((HOST,PORT),timeout=20)
+                  raw.sendall(f"CONNECT {SNI}:443 HTTP/1.1\r\nHost: {SNI}:443\r\n\r\n".encode())
+                  buf=b""
+                  while b"\r\n\r\n" not in buf:
+                      d=raw.recv(4096)
+                      if not d: raise RuntimeError("proxy closed")
+                      buf+=d
+                  ss=ctx.wrap_socket(raw,server_hostname=SNI)
+                  print(f"RESULT py{os.path.basename(sys.executable)} mode={mode} strict_default={strict_on} PASS tls={ss.version()}")
+                  ss.close()
+                  PYEOF
+                  for p in $(ls -d $HOME/.local/share/uv/python/*/bin/python3 2>/dev/null | sort -V); do
+                    V=$("$p" -c 'import sys;print("%d.%d"%sys.version_info[:2])')
+                    if "$p" aki_check.py default 2>/dev/null; then rec "python-$V(default) PASS"; else ERR=$("$p" aki_check.py default 2>&1 | tail -1); rec "python-$V(default) FAIL ($ERR)"; fi
+                    if "$p" aki_check.py nostrict 2>/dev/null; then rec "python-$V(nostrict) PASS"; fi
+                  done
+
+                  step "4/7 node 最新 LTS（npm 的 TLS 栈，自带 openssl；动态取版本）"
+                  NV=$(curl -s https://nodejs.org/dist/index.json | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{console.log(JSON.parse(d).find(x=>x.lts).version)})')
+                  echo "node $NV"
+                  # 下载稳健化：校验+重试 ≤5 次（运行记录教训）
+                  for i in 1 2 3 4 5; do
+                    curl -sL "https://nodejs.org/dist/$NV/node-$NV-linux-arm64.tar.xz" -o node.txz || { rm -f node.txz; sleep 5; continue; }
+                    tar tJf node.txz >/dev/null 2>&1 && break
+                    rm -f node.txz; sleep 5
+                  done
+                  tar xJf node.txz && NPATH=/tmp/akit/node-$NV-linux-arm64/bin
+                  cat > aki_node.js <<'JSEOF'
+                  const tls=require('tls'),net=require('net'),fs=require('fs');
+                  const s=net.connect(3128,'squid-cache.squid.svc.cluster.local',()=>{
+                    s.write('CONNECT conda.anaconda.org:443 HTTP/1.1\r\nHost: conda.anaconda.org:443\r\n\r\n');});
+                  let buf='';s.on('data',function h(d){buf+=d;
+                    if(buf.includes('\r\n\r\n')){s.removeListener('data',h);
+                      const t=tls.connect({socket:s,servername:'conda.anaconda.org',
+                        ca:fs.readFileSync('ca.pem'),rejectUnauthorized:true},
+                        ()=>console.log('RESULT node'+process.version+' PASS tls='+t.getProtocol()));
+                      t.on('error',e=>console.log('RESULT node'+process.version+' FAIL '+e.message));}});
+                  JSEOF
+                  NODEOUT=$(timeout 30 $NPATH/node aki_node.js); echo "$NODEOUT"
+                  case "$NODEOUT" in *PASS*) rec "node-$NV PASS";; *) rec "node-$NV FAIL ($NODEOUT)";; esac
+
+                  step "5/7 go：apt 1.24 vs 最新（go.dev/dl → 重写 aliyun）"
+                  cat > aki_go.go <<'GOEOF'
+                  package main
+                  import ("crypto/x509";"encoding/pem";"fmt";"os")
+                  func main(){
+                    lb,_:=os.ReadFile("leaf.pem"); cb,_:=os.ReadFile("ca.pem")
+                    lbk,_:=pem.Decode(lb); cbk,_:=pem.Decode(cb)
+                    leaf,_:=x509.ParseCertificate(lbk.Bytes)
+                    ca,_:=x509.ParseCertificate(cbk.Bytes)
+                    roots:=x509.NewCertPool(); roots.AddCert(ca)
+                    if _,err:=leaf.Verify(x509.VerifyOptions{DNSName:"conda.anaconda.org",Roots:roots});err!=nil{
+                      fmt.Println("RESULT FAIL",err); os.Exit(0)}
+                    fmt.Println("RESULT PASS")
+                  }
+                  GOEOF
+                  GV1=$(/usr/lib/go-1.24/bin/go version); echo "$GV1"
+                  GOOUT1=$(GOTOOLCHAIN=local GOPROXY=off /usr/lib/go-1.24/bin/go run aki_go.go); echo "$GOOUT1"
+                  case "$GOOUT1" in *PASS*) rec "go-1.24(apt) PASS";; *) rec "go-1.24(apt) FAIL";; esac
+                  # go.dev/dl/?mode=json 会被 go.dev/dl/* 重写规则命中返回 HTML（第 3 轮教训），
+                  # 改从（重写后的）目录页 grep 解析最新版
+                  GOF=$(curl -sL "https://go.dev/dl/" | grep -oE 'go1[0-9.]+\.linux-arm64\.tar\.gz' | sort -V | tail -1)
+                  echo "go latest: $GOF"
+                  # 下载稳健化：校验+重试 ≤5 次（运行记录教训）
+                  for i in 1 2 3 4 5; do
+                    curl -sL "https://go.dev/dl/$GOF" -o go.tgz || { rm -f go.tgz; sleep 5; continue; }
+                    tar tzf go.tgz >/dev/null 2>&1 && break
+                    rm -f go.tgz; sleep 5
+                  done
+                  mkdir -p /usr/local/go-new && tar -C /usr/local/go-new --strip-components=1 -xzf go.tgz
+                  GV2=$(/usr/local/go-new/bin/go version); echo "$GV2"
+                  GOOUT2=$(GOTOOLCHAIN=local GOPROXY=off /usr/local/go-new/bin/go run aki_go.go); echo "$GOOUT2"
+                  case "$GOOUT2" in *PASS*) rec "go-${GOF%.linux-arm64.tar.gz} PASS";; *) rec "go-${GOF%.linux-arm64.tar.gz} FAIL";; esac
+
+                  step "6/7 rustls 最新（rust stable + WebPkiServerVerifier 直校伪造叶子）"
+                  # 下载稳健化：rustup-init 重试 ≤5 次
+                  for i in 1 2 3 4 5; do
+                    curl -sSf https://static.rust-lang.org/rustup/dist/aarch64-unknown-linux-gnu/rustup-init -o rustup-init && break
+                    sleep 5
+                  done
+                  chmod +x rustup-init && ./rustup-init -y --profile minimal >/dev/null 2>&1
+                  export PATH=$HOME/.cargo/bin:$PATH
+                  rustc --version
+                  cargo new aki_rust >/dev/null 2>&1 && cd aki_rust
+                  echo "--- cargo add（不再静默，网络抖动会暴露）---"
+                  cargo add rustls rustls-pki-types 2>&1 | tail -3
+                  mkdir -p src && cat > src/main.rs <<'RSEOF'
+                  use rustls::client::WebPkiServerVerifier;
+                  use rustls::client::danger::ServerCertVerifier;
+                  use rustls_pki_types::{pem::PemObject, CertificateDer, ServerName, UnixTime};
+                  use std::time::{SystemTime, UNIX_EPOCH};
+                  fn main(){
+                    // 二进制在 aki_rust/ 下运行，证书在 /tmp/akit/ —— 用绝对路径
+                    let ca:Vec<CertificateDer>=CertificateDer::pem_file_iter("/tmp/akit/ca.pem").unwrap()
+                      .collect::<Result<_,_>>().unwrap();
+                    let mut roots=rustls::RootCertStore::empty();
+                    roots.add_parsable_certificates(ca);
+                    let v=WebPkiServerVerifier::builder(std::sync::Arc::new(roots)).build().unwrap();
+                    let leaf=CertificateDer::from_pem_file("/tmp/akit/leaf.pem").unwrap();
+                    let name=ServerName::try_from("conda.anaconda.org".to_string()).unwrap();
+                    // 最新 pki-types 已移除 TryFrom<SystemTime>（第 4 轮 E0277），改用构造函数
+                    let dur=SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+                    let now=UnixTime::since_unix_epoch(dur);
+                    match v.verify_server_cert(&leaf,&[],&name,&[],now){
+                      Ok(_approved)=>println!("RESULT rustls PASS"),
+                      Err(e)=>println!("RESULT rustls FAIL {}",e),
+                    }
+                  }
+                  RSEOF
+                  # 先编译成功、再单独跑二进制、精确匹配输出——第 6 轮教训：
+                  # 绝不能对 cargo 全量日志 grep PASS（rustc 报错会回显源码行，
+                  # 源码里的 "RESULT rustls PASS" 字样会污染 grep 导致假 PASS）
+                  if cargo build --quiet 2>/dev/null; then
+                    RSOUT=$(./target/debug/aki_rust 2>&1); echo "$RSOUT"
+                    case "$RSOUT" in *"RESULT rustls PASS"*) rec "rustls-$(cargo pkgid rustls 2>/dev/null | cut -d# -f2) PASS";; *) rec "rustls-latest FAIL ($RSOUT)";; esac
+                  else
+                    echo "cargo build FAILED:"; cargo build 2>&1 | tail -20
+                    rec "rustls-latest FAIL (compile error)"
+                  fi
+                  cd /tmp/akit
+
+                  step "7/7 汇总"
+                  echo; echo "======== AKI 版本矩阵结果 ========"; cat "$RESULTS"
+                  echo "=================================="
+                  DUR=$(( ($(date +%s%N)-START)/1000000 ))
+                  echo "DURATION: ${DUR}ms"
+                  # 矩阵预期（v7.7.2 AKI 补丁版）：全 PASS——openssl-strict 与
+                  # python 3.13/3.14 default 由补丁前 FAIL 翻绿（第 6 轮实锤）
+                  EXP=1
+                  grep -q "openssl-default PASS" "$RESULTS" || EXP=0
+                  grep -q "openssl-strict PASS" "$RESULTS" || EXP=0
+                  grep -q "python-3.12(default) PASS" "$RESULTS" || EXP=0
+                  grep -q "python-3.13(default) PASS" "$RESULTS" || EXP=0
+                  grep -q "python-3.14(default) PASS" "$RESULTS" || EXP=0
+                  grep -q "rustls-" "$RESULTS" && grep -q "rustls-latest FAIL" "$RESULTS" && EXP=0
+                  if [ "$EXP" = "1" ]; then echo "MATRIX CONFIRMED"; else echo "MATRIX MISMATCH (见 results)"; exit 1; fi
+              env:
+                - name: HTTP_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: HTTPS_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: http_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: https_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: NO_PROXY
+                  value: "0.0.0.0,localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+                - name: no_proxy
+                  value: "0.0.0.0,localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+                - name: SSL_CERT_FILE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: CURL_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: REQUESTS_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: PIP_CERT
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: NODE_EXTRA_CA_CERTS
+                  value: /etc/squid-ca/squid-ca.pem
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true
+          nodeSelector:
+            kubernetes.io/arch: arm64
+          imagePullSecrets:
+            - name: huawei-swr-image-pull-secret-model-gy
+          activeDeadlineSeconds: 2400
+          securityContext:
+            runAsUser: 0
+          restartPolicy: Never

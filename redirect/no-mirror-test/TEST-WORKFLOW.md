@@ -69,32 +69,25 @@
 ### 4.1 一键循环（全部 14 个，按文件名顺序）
 
 ```bash
-cd /home/chenqi252/code/gitcode-ci/workspace-squid/squid_e2e_tests/.worktrees/docs-mirror-cache-topic/redirect/no-mirror-test
-
-K="kubectl --kubeconfig $HOME/.kube/gy-006.yaml -n squid"
-for f in tool-*.yaml; do
-  echo ">>> apply $f"
-  $K apply -f "$f"
-  sleep 2   # generateName 异步生成 Job，稍等再取
-  JOB=$($K get jobs -o name --field-selector=status.successful=0 2>/dev/null | grep test-squid- | tail -1)
-  echo ">>> waiting for $JOB"
-  if $K wait --for=condition=complete "$JOB" --timeout=2400s; then
-    $K logs "$JOB" | grep -E '✅|DURATION'
-  else
-    echo "!!! FAILED/TIMEOUT: $f ($JOB)"
-    $K logs "$JOB" --tail=50 || true
-  fi
-done
+./run-all.sh          # 日志落在 /tmp/no-mirror-rerun.log
+tail -f /tmp/no-mirror-rerun.log
 ```
 
-说明：Job 用 `generateName: test-squid-*`，名字随机，所以 apply 后用
-`kubectl get jobs --field-selector=status.successful=0`（未完成 Job）+ `grep test-squid-` 取最新一个。
+脚本要点（v7.7.2 回归轮踩坑修正）：
+- **Volcano Job 必须用 `kubectl create -o name` 拿回 Job 名**——`get jobs` 列的是
+  batch/v1 Job，看不见 Volcano vcjob（曾导致整轮"等空名字"、Job 30 分钟 TTL 后
+  日志随 Pod 一起被 GC，白跑一轮）；
+- wait 用 `vcjob/<name>`；日志用 `get pods | grep <job名>` 定位 Pod 再取。
+
+说明：Job 用 `generateName: test-squid-*`，名字随机——所以必须 `create -o name`
+当场拿回名字再 wait（见上）；`kubectl apply` 与 generateName 不兼容
+（"cannot use generate name with apply"）。
 
 ### 4.2 单文件运行示例（以 tool-01-pip 为例）
 
 ```bash
 K="kubectl --kubeconfig $HOME/.kube/gy-006.yaml -n squid"
-$K apply -f tool-01-pip.yaml
+$K create -f tool-01-pip.yaml   # generateName 必须用 create，不能用 apply
 sleep 2
 JOB=$($K get jobs -o name --field-selector=status.successful=0 | grep test-squid-pip | tail -1)
 $K wait --for=condition=complete "$JOB" --timeout=2400s

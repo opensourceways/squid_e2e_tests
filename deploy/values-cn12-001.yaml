@@ -35,6 +35,20 @@ squid:
     limits:
       cpu: 2
       memory: 4Gi
+  # 纯 rewrite 架构（2026-09-18 对齐 gy-001/002/005/006/wlcb-001；chart CM 内置 helper：
+  # pypi→huaweicloud / github archive+releases→gh-proxy / go→goproxy.cn / conda→nju /
+  # apt→huaweicloud；registry splice 与白名单外流量原样放行，helper 全灭 1s 自愈降级直连）
+  urlRewrite:
+    enabled: true
+    ghProxyHost: gh-proxy.test.osinfra.cn
+
+images:
+  squid:
+    # AKI 补丁版（gadgets.cc-aki.patch，2026-09-16）：client-first 伪造证书补 AKI，
+    # 修复 Python 3.13+/conda 26 strict 校验拒签
+    tag: "v7.7.2"
+    # 强制拉取最新，避免命中节点上可能存在的旧 v7.7.1 标签镜像
+    imagePullPolicy: Always
 
 registryProxy:
   # registry 域 splice 到同 Pod 的 rpardini sidecar，blob 缓存 150G（PVC 200Gi）

@@ -37,34 +37,22 @@ spec:
                   echo "=========================================="
 
                   echo "--- Installing git + Go toolchain (zero mirror config) ---"
-                  # 零镜像配置：apt 官方源经 squid 重写；ubuntu 24.04 自带 golang-go 1.22，
-                  # 满足 GOTOOLCHAIN=auto（>=1.21），无需 aliyun tarball
+                  # 零镜像配置：apt 官方源经 squid 重写；noble 的 golang-1.24-go 的
+                  # GOTOOLCHAIN=auto 推导正确（1.22 有 bug，把 go 1.26 解析成坏版本名
+                  # v0.0.1-go1.26 → 404），go 自己读 go.mod 下载 1.26 工具链（经 GOPROXY 重写）
                   grep -h "URIs: http://ports.ubuntu.com" /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null | head -1
                   apt-get update -qq 2>&1 | tail -2 || true
-                  apt-get install -y -qq git curl golang-go 2>&1 | tail -3 || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq git curl golang-go 2>&1 | tail -3; }
+                  apt-get install -y -qq git curl golang-1.24-go 2>&1 | tail -3 || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq git curl golang-1.24-go 2>&1 | tail -3; }
+                  export PATH=/usr/lib/go-1.24/bin:$PATH
                   T_START=$(date +%s%3N)
 
                   go version
 
-                  # GOTOOLCHAIN=auto lets `go` itself download+cache the exact
-                  # toolchain go.mod asks for (e.g. go1.26) via GOPROXY — this is
-                  # itself a big cacheable download that exercises the proxy.
-                  # 零镜像配置：GOPROXY/GOSUMDB 保持默认（proxy.golang.org + sum.golang.org），
-                  # squid 重写 proxy.golang.org → goproxy.cn，sumdb 校验路径一并重写
+                  # GOTOOLCHAIN=auto：go 自己读 go.mod（要求 1.26）下载对应工具链
+                  # （经 GOPROXY，squid 重写 → goproxy.cn，sumdb 校验路径一并重写），真实 CI 流程
                   go env -w GOTOOLCHAIN=auto
                   echo "GOPROXY  = $(go env GOPROXY)"
                   echo "GOMODCACHE = $(go env GOMODCACHE)"
-
-                  # 本地 golang-go 1.22 太老（GOTOOLCHAIN 解析有缺陷，请求不存在的
-                  # v0.0.1-go1.26 字面版本）。真实 CI 的做法：装官方发行版 tarball——
-                  # URL 用官方 go.dev/dl（客户端零镜像配置），squid 重写
-                  # go.dev/dl + dl.google.com/go → mirrors.aliyun.com/golang（路径同构）
-                  GOVER=1.26.0
-                  echo "--- install Go $GOVER from official go.dev/dl (squid rewrites) ---"
-                  curl -sSLo /tmp/go.tgz --max-time 300 "https://go.dev/dl/go$GOVER.linux-arm64.tar.gz"
-                  rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tgz
-                  export PATH=/usr/local/go/bin:$PATH
-                  go version
 
                   echo ""
                   echo "--- git clone mind-cluster (through squid) ---"
