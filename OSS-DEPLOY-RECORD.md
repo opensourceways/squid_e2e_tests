@@ -154,6 +154,56 @@
 | verl-project/verl-omni          | ⏳ 未部署          | <br /> | <br /> |
 | verl-project/verl-SpeCo         | ⏳ 未部署          | <br /> | <br /> |
 | vllm-ascend/vllm-ascend-recipes | ⏳ 未部署          | <br /> | <br /> |
-| vllm-project/vllm-ascend        | ⏳ 未部署（9.14 部署） | <br /> | <br /> |
+| vllm-project/vllm-ascend        | ⏳ 未部署（随新集群批次部署，见 §3） | <br /> | <br /> |
 | vllm-project/vllm-omni          | ⏳ 未部署          | <br /> | <br /> |
+
+***
+
+## 3. 新集群部署批次（2026-09-14 登记，待存储安排）
+
+> 状态：**values 已准备，等待存储安排，计划 2026-09-15 部署**。
+> 部署基线：chart `squid-rpardini` 0.1.10（registry ACL 与 `registryProxy.registries` 同源自动生成；
+> catch-all 已切 `refresh_pattern . 0 0% 0 refresh-ims`）。
+
+### 3.1 本批次集群
+
+| 集群 | values | 状态 |
+|---|---|---|
+| gy-003 | 待建（参照 values-gy-005.yaml） | ⏳ 等存储安排 |
+| gy-004 | 待建（参照 values-gy-005.yaml） | ⏳ 等存储安排 |
+| gy-005 | `deploy/values-gy-005.yaml`（storageClass=squid-subpath-sc，SFS Turbo `b46afb97` subpath 模式） | ⏳ 等存储安排 |
+| hk-001 | 待建（参照 values-gy-005.yaml） | ⏳ 等存储安排 |
+| aiframe | 待建（参照 values-gy-005.yaml） | ⏳ 等存储安排 |
+| mind | 待建（参照 values-gy-005.yaml） | ⏳ 等存储安排 |
+
+> 各集群 StorageClass / SFS Turbo 绑定关系待存储安排确定后补入对应 values，
+> `persistence.squidCache.size` 保持 50Gi（VolumeClaimTemplate 不可变约束）。
+
+### 3.2 部署后动作（2026-09-15）
+
+1. **逐集群部署**：`helm install`（或 upgrade）→ rollout 就绪 → configmap 验证（流程同既有 6 集群）。
+2. **vllm-ascend CI 注入**：
+   - 为 vllm-ascend 注入 **CPU pod**（vllm-ascend 单节点测试的 CPU 侧 runner pod）；
+   - 为 **vllm-ascend 单节点测试 CI（single-node-test）注入 squid** 代理（注入配方见 `deploy/DEPLOY.md`：
+     `HTTP(S)_PROXY=http://squid-cache.squid.svc.cluster.local:3128` + no_proxy 白名单，
+     已含 `0.0.0.0,localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local` 等）。
+3. 注入后按 `RUNNER-NO-PROXY-AUDIT.md` §2 的实测计划验证 SWR push / OBS / openlibing 等 B 类场景。
+
+***
+
+## 4. 部署问题与方案（squid / buildkit fork）
+
+### 4.1 redirect 问题：client-first + patch squid ✅ 已完成
+
+- 方案：**client-first** 连接复用策略 + 对 squid 打补丁。
+- 设计文档：https://github.com/ccijunk/squid/blob/v7.7.2/DESIGN-aki-client-first-bump.md
+- 说明：解决 SSL-bump 下连接复用导致的 301 循环 / 重定向异常（详见设计文档）。
+- **仍有问题 / 待决策**：是否用 **cache_peer** 指向 **cache-service**（内部镜像源/缓存服务），把重定向后的回源流量打到内部镜像？
+
+### 4.2 buildkitd 网络代理问题 ⏳ 计划中
+
+- 方案：buildkitd 注入代理（proxy）与 CA 环境变量，使 RUN 内 HTTPS 流量经代理走 squid。
+- 计划文档：https://github.com/ccijunk/buildkit/blob/v0.33.0-inject-env/PLAN-inject-proxy-ca-env.md
+- 对应：§2.1 中「buildkit 场景被卡住：buildkitd 的 dockerfile 代理与镜像重定向问题未解决」，落地后即可打通贡献开源仓库的构建依赖下载。
+- **前置条件 / 待决策**：该方案需要容器以 **root 权限运行**（rootful 镜像），并要求授予多个 **Linux capabilities**（如 SYS_ADMIN）以及 **可写 cgroup**（cgroup v2 rw 挂载，用于资源控制）——权限要求较高，是否要部署？
 
