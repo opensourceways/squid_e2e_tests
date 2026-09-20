@@ -23,12 +23,13 @@
 | 2 | `github.com/*/archive/*` | `gh-proxy.test.osinfra.cn/<原URL>` | 前缀重写 |
 | 3 | `github.com/*/releases/download/*` | `gh-proxy.test.osinfra.cn/<原URL>` | 前缀重写 |
 | 4 | `proxy.golang.org/*` | `goproxy.cn/*` | go 模块下载与 sumdb 校验（默认走 GOPROXY 路径）一并重写，无需配 GOSUMDB |
+| 4b | `go.dev/dl/*`、`dl.google.com/go/*`（tarball 文件） | `mirrors.aliyun.com/golang/<文件名>` | Go 发行版 tarball（路径同构、文件名唯一）；**`?mode=json*` 分流例外** → `golang.google.cn/dl/`（2026-09-20 修复：整体重写曾把 JSON API 劫持成 aliyun 目录页，pre-commit golang hook JSONDecodeError，见 §9 / tool-18） |
 | 5 | `archive.ubuntu.com/*`、`ports.ubuntu.com/*` | `repo.huaweicloud.com/*` | host 交换，路径不变 |
 | 6 | `registry.npmjs.org/*` | `registry.npmmirror.com/*` | host 交换（路径完全同构；tarball immutable 长缓存） |
 | 7 | `index.crates.io/*` | `rsproxy.cn/index/*` | cargo sparse index 交换；其 config.json dl 指回 rsproxy，tarball 下载随之透明 |
-| 8 | `static.crates.io/crates/*` | `rsproxy.cn/crates/*` | crate 对象交换（`.crate$` 长缓存规则已覆盖） |
-| 9 | `conda.anaconda.org/*` | `mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/*` | conda channel host 交换（结构同构） |
-| 10 | `repo.anaconda.com/pkgs/*`、`repo.anaconda.com/miniconda/*` | `mirrors.tuna.tsinghua.edu.cn/anaconda/*` | installer / pkgs host 交换 |
+| 8 | `static.crates.io/crates/*` | `rsproxy.cn/api/v1/crates/<crate>/<ver>/download` | crate 对象兜底（2026-09-20 修复：rsproxy 真实下载端点是 `/api/v1/crates`，307 → lf*-static.rsproxy.cn；旧映射 `rsproxy.cn/crates/*` 实测 404，见 §9 / tool-17） |
+| 9 | `conda.anaconda.org/*` | `mirror.nju.edu.cn/anaconda/cloud/*` | conda channel host 交换（结构同构；2026-09-16 tuna→nju，nju 22~26MB/s vs tuna 2.5~4.8MB/s） |
+| 10 | `repo.anaconda.com/pkgs/*`、`repo.anaconda.com/miniconda/*` | `mirror.nju.edu.cn/anaconda/*` | installer / pkgs host 交换（tuna→nju 同上） |
 | 11 | `repo.openeuler.org/*` | `mirrors.huaweicloud.com/openeuler/*` | yum 源 host 交换（路径同构；`.rpm$` 长缓存） |
 | 12 | `files.pythonhosted.org/packages/*` | `repo.huaweicloud.com/repository/pypi/packages/*` | pypi 对象域兜底（客户端硬编码 files.pythonhosted 时，路径同构） |
 | 13 | `raw.githubusercontent.com/*` | `gh-proxy.test.osinfra.cn/<原URL>` | gh-proxy 白名单支持 raw 形态 |
@@ -130,7 +131,7 @@ kubectl --kubeconfig ~/.kube/gy-006.yaml -n squid exec squid-cache-0 -c squid --
 | `repo.huaweicloud.com/ubuntu-ports/...` | 规则 5：apt 官方 ports 源 host 交换（access.log 里只见 repo.huaweicloud.com，客户端仍配 ports.ubuntu.com） |
 | `registry.npmmirror.com/...` | 规则 6：npm/pnpm 官方 registry host 交换（tool-09/15） |
 | `rsproxy.cn/index/...`、`rsproxy.cn/crates/...` | 规则 7/8：cargo sparse index + crate 下载（tool-10） |
-| `mirrors.tuna.tsinghua.edu.cn/anaconda/...` | 规则 9/10：conda channel 与 miniconda installer（tool-11） |
+| `mirror.nju.edu.cn/anaconda/...` | 规则 9/10：conda channel 与 miniconda installer（tool-11；2026-09-16 起 tuna→nju） |
 | `mirrors.huaweicloud.com/openeuler/...` | 规则 11：yum 官方源 host 交换（tool-16） |
 
 **本地缓存验证（MISS→HIT 二连发）**：
@@ -150,11 +151,13 @@ kubectl --kubeconfig ~/.kube/gy-006.yaml -n squid exec squid-cache-0 -c squid --
 - **13-huggingface 与 17-docker-pull 未纳入**：前者按需求排除；后者走 registry-proxy sidecar
   机制，与 url_rewrite 无关；
 - **cargo host-swap 的两层语义**（规则 7/8）：index.crates.io → rsproxy.cn/index 使 sparse index
-  可达；其返回的 config.json 里 dl 字段指回 rsproxy.cn/crates → cargo 后续 tarball 下载直接请求
-  rsproxy.cn（客户端视角仍是"官方流程"，无感知）；规则 8 兜底覆盖显式 static.crates.io 请求；
-- **conda repodata 较大**：tuna 的 repodata.json 未配专属 refresh_pattern，走 catch-all
+  可达；其返回的 config.json 里 dl 字段 = `https://rsproxy.cn/api/v1/crates`（2026-09-20 实测，
+  下载走 `/api/v1/crates/<crate>/<ver>/download` → 307 → lf*-static.rsproxy.cn）→ cargo 后续
+  tarball 下载直接请求 rsproxy.cn（客户端视角仍是"官方流程"，无感知）；规则 8 兜底覆盖显式
+  static.crates.io 请求（tool-17 守卫断言会在 rsproxy 改模板时报警）；
+- **conda repodata 较大**：nju 的 repodata.json 未配专属 refresh_pattern，走 catch-all
   `0 0% 0 refresh-ims`（每次带 LM 校验回源，可用但慢）；若观测到瓶颈再补 `0 20% 4320` 规则；
-- **镜像站行为差异**：npmmirror/rsproxy/tuna 对 origin 的元数据新鲜度有同步延迟（分钟级），
+- **镜像站行为差异**：npmmirror/rsproxy/nju 对 origin 的元数据新鲜度有同步延迟（分钟级），
   CI 场景（发版后立刻拉取）可能撞上 404——当前按"可接受"处理，撞上即重试。
 
 ## 8. TODO：git clone 透明重写实验（待做）
@@ -188,3 +191,55 @@ https://github.com/*/info/refs*|https://github.com/*/git-upload-pack)
 
 **收尾**：成功 → helper 规则转正并回填本节与 `redirect/gh-proxy/JUDGEMENT.md`；
 失败 → 撤规则，结论留档（"clone 会话不可服务端重写"实锤），客户端 insteadOf 维持现状。
+
+## 9. 2026-09-20 新增用例：同构性校验 + pre-commit golang hook（tool-17 / tool-18）
+
+这两个用例不是"工具装包"型 e2e，而是 **helper 重写质量守护**，纳入 `run-all.sh` 循环
+（`tool-*.yaml` 自动发现）：
+
+### tool-17-rewrite-parity.yaml — 重写规则"路径同构性"全量校验
+
+- **动机**：每条重写规则都隐含"镜像站与源站路径同构"假设；某条映射若只是**部分同构**
+  （路径结构不完全一致），重写产物 404/内容错——客户端零感知地坏掉。
+- **方法**：把 13 条规则的代表性 URL（含动态样本：pypi 真实 wheel 路径）喂给**线上真实
+  helper**（挂载 squid-config CM）取 `rewrite-url`，再请求重写产物，按内容签名判定
+  （JSON 字段 / gzip 魔数 `1f8b08` / ELF 魔数 `7f454c46` / `Origin: Ubuntu` / `<repomd`）；
+  另含一条**负样本对照**（故意去掉 nju conda 的 `/cloud/` 前缀，期望 404），证明判定方法有效。
+- **实测发现（2026-09-20）**：规则 8 旧映射 `static.crates.io → rsproxy.cn/crates/*` **404**
+  ——rsproxy 真实下载形态是 `config.json dl = https://rsproxy.cn/api/v1/crates` →
+  `/<crate>/<ver>/download`（307 → lf*-static.rsproxy.cn）。helper 已修复（按文件名最后
+  一个 `-` 切分 crate/ver），并加了 `config.json` 守卫断言——rsproxy 再改模板会报警。
+- **报告（gy-006，helper rev78）**：`pass=38 fail=0`，Pod Succeeded ✅
+  （覆盖 13 条规则 × 同构 + helper 断言 + 负样本对照；gy-002 rev16 同结果）。
+
+### tool-18-precommit-golang-hook.yaml — pre-commit golang hook 端到端（修复验证）
+
+- **背景**：gy-002 memcache PR 流水线实锤——gitleaks hook（`language: golang`）在无 `go`
+  的执行机上，pre-commit 4.x 请求 `go.dev/dl/?mode=json` 拿版本；旧 helper 把它整体重写到
+  aliyun 目录页 → `JSONDecodeError: Expecting value: line 2 column 1 (char 2)` → 安装失败。
+  复现版测试（复现成功才 PASS）留档于 `redirect/test/06`。
+- **修复**：helper 规则 4b 内 case 分流——`?mode=json*` → `golang.google.cn/dl/`
+  （Google 中国官方镜像，同路径同 JSON，实测 ~0.5s，优于 go.dev 直连 ~1-2s 抖动）；
+  tarball → aliyun 不变。
+- **判定**（修复验证型，成功=Pod Complete）：Stage A `?mode=json` 必须返回
+  `application/json`；Stage B `pre-commit run --all-files` 必须整体通过（无 go 预装，
+  走自动工具链下载+编译 gitleaks）。若复现出 JSONDecodeError → FAIL（helper 仍是旧版）。
+- **报告（gy-006，helper rev78）**：Stage A `HTTP 200 application/json 22807B`（go1.27.1），
+  Stage B `Detect hardcoded secrets...Passed`，`DURATION: 53178ms`，Pod Succeeded ✅
+  ——**CI 镜像无需预装 go**，修复后 pre-commit 全链路（JSON API → 工具链下载 → 编译 → 扫描）
+  在透明重写下自动走通；go 工具链 tarball 经规则 4b → aliyun，模块经规则 4 → goproxy.cn。
+
+### 下发状态（helper 新版：规则 4b 分流 + 规则 8 crates 修复；2026-09-20 全量下发完成）
+
+| 集群 | helm revision | helper 新版抽查（pod 内 grep） |
+|---|---|---|
+| gy-002 | 17 | ✅ 4b 分流 + api/v1/crates 均在 |
+| gy-006 | 79 | ✅ 同上；tool-17 ✅ 38/38、tool-18 ✅ PASS |
+| ascend-cn12-001 | 6 | ✅ 同上 |
+| gy-001 | 20 | ✅ 同上 |
+| gy-005 | 7 | ✅ 同上 |
+| wlcb-001 | 19 | ✅ 同上 |
+
+全量回归（gy-006，run-all.sh）：tool-01~16 + 17/18 共 **18/18 Succeeded**
+（tool-18 该轮冷缓存 + 出口拥塞，DURATION 475s——pre-commit 阶段输出重定向
+`/tmp/pc.log`，静默期属正常，非卡死）。

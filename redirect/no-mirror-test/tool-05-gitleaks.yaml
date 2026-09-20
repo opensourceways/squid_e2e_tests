@@ -1,0 +1,190 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: test-squid-gitleaks-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-squid-gitleaks
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 1800
+  tasks:
+    - name: test-squid-gitleaks
+      replicas: 1
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+              command:
+                - bash
+                - -c
+              args:
+                - |
+                  #!/bin/bash
+                  set -e
+
+                  echo ""
+                  echo "=========================================="
+                  echo "Scenario 5: gitleaks through squid"
+                  echo "=========================================="
+                  # 验证点：GitHub releases/download 二进制经 squid（client-first bump +
+                  # url_rewrite → gh-proxy）下载，refresh_pattern 长缓存规则命中能力；
+                  # 以及 gitleaks（真实 CI 安全扫描工具）对真实仓库的完整检测流程。
+
+                  echo "--- Installing git + curl (zero mirror config) ---"
+                  apt-get update -qq 2>&1 | tail -2 || true
+                  apt-get install -y -qq git curl 2>&1 | tail -3 || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq git curl 2>&1 | tail -3; }
+                  T_START=$(date +%s%3N)
+
+                  echo ""
+                  echo "--- Download gitleaks v8.24.3 (github releases → gh-proxy rewrite) ---"
+                  # 路径：github.com/gitleaks/gitleaks/releases/download/... 经 helper 重写为
+                  # gh-proxy 前缀 URL，命中 refresh_pattern github\.com/.*/releases/download/
+                  # 长缓存规则（首拉 MISS 回源，后续 pod L1 HIT）
+                  T0=$(date +%s%3N)
+                  curl -fsSL -o /tmp/gitleaks.tar.gz \
+                    https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_arm64.tar.gz
+                  T1=$(date +%s%3N)
+                  echo "download took $((T1 - T0))ms, size: $(du -h /tmp/gitleaks.tar.gz | awk '{print $1}')"
+
+                  echo ""
+                  echo "--- Re-download (squid L1 HIT check, expect ~ms) ---"
+                  rm -f /tmp/gitleaks.tar.gz.2
+                  T2=$(date +%s%3N)
+                  curl -fsSL -o /tmp/gitleaks.tar.gz.2 \
+                    https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_arm64.tar.gz
+                  T3=$(date +%s%3N)
+                  echo "re-download took $((T3 - T2))ms"
+
+                  echo ""
+                  echo "--- Install gitleaks ---"
+                  tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+                  chmod +x /usr/local/bin/gitleaks
+                  gitleaks version
+
+                  echo ""
+                  echo "--- git clone mind-cluster (through squid) ---"
+                  T4=$(date +%s%3N)
+                  git clone --depth 1 https://gitcode.com/Ascend/mind-cluster.git /workspace/mind-cluster 2>&1 | tail -5
+                  T5=$(date +%s%3N)
+                  echo "git clone took $((T5 - T4))ms"
+
+                  echo ""
+                  echo "=========================================="
+                  echo "gitleaks detect on mind-cluster (cold, default ruleset)"
+                  echo "=========================================="
+                  T6=$(date +%s%3N)
+                  gitleaks detect -s /workspace/mind-cluster \
+                    --report-format json --report-path /workspace/gitleaks-report.json \
+                    --exit-code 0 --no-banner --redact 2>&1 | tail -10
+                  T7=$(date +%s%3N)
+                  echo "gitleaks detect took $((T7 - T6))ms"
+
+                  echo ""
+                  echo "--- findings summary ---"
+                  # JSON 报告每条 finding 都有 "RuleID" 字段（兼容有无空格两种格式）；
+                  # 不用 python heredoc——块标量内 0 缩进会终止 YAML 字面块
+                  if [ -s /workspace/gitleaks-report.json ]; then
+                    grep -c '"RuleID"' /workspace/gitleaks-report.json | xargs echo "total findings:"
+                    grep -o '"RuleID": *"[^"]*"' /workspace/gitleaks-report.json | sort | uniq -c | sort -rn | head -10
+                  else
+                    echo "total findings: 0"
+                  fi
+
+                  echo ""
+                  echo "=========================================="
+                  T_END=$(date +%s%3N)
+                  echo "DURATION: $((T_END - T_START))ms"
+                  echo "✅ Scenario 5 completed."
+                  echo "=========================================="
+              lifecycle:
+                postStart:
+                  exec:
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set +e
+
+                        P=/etc/squid-ca/squid-ca.pem
+                        if [ -f "$P" ]; then
+                          if [ -d /etc/pki/ca-trust/source/anchors ]; then
+                            cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                            update-ca-trust extract >/dev/null 2>&1
+                          else
+                            cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                            update-ca-certificates -f >/dev/null 2>&1
+                          fi
+                        fi
+
+                        if command -v apt-get >/dev/null 2>&1 && [ -n "$HTTPS_PROXY" ]; then
+                          mkdir -p /etc/apt/apt.conf.d
+                          printf 'Acquire::http::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\nAcquire::https::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\n' > /etc/apt/apt.conf.d/99squid-proxy
+                        fi
+
+                        exit 0
+              workingDir: /workspace
+              resources:
+                limits:
+                  cpu: "4"
+                  memory: 6Gi
+                requests:
+                  cpu: "2"
+                  memory: 4Gi
+              env:
+                - name: WORKSPACE
+                  value: /workspace
+                - name: HTTP_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: HTTPS_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: http_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: https_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: NO_PROXY
+                  value: "0.0.0.0,localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+                - name: no_proxy
+                  value: "0.0.0.0,localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+
+                - name: SSL_CERT_FILE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: CURL_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: REQUESTS_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
+                  value: /etc/squid-ca/squid-ca.pem
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+                - name: workspace
+                  mountPath: /workspace
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true
+            - name: workspace
+              emptyDir:
+                sizeLimit: 10Gi
+          nodeSelector:
+            kubernetes.io/arch: arm64
+          imagePullSecrets:
+            - name: huawei-swr-image-pull-secret-model-gy
+          activeDeadlineSeconds: 2400
+          securityContext:
+            runAsUser: 0
+          restartPolicy: Never

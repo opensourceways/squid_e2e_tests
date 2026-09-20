@@ -1,0 +1,235 @@
+# 复现测试：pre-commit golang hook（gitleaks）在 urlRewrite 开启时的 JSONDecodeError
+#
+# 背景（gy-002 2026-09-20 memcache PR 流水线实锤，见 project_memory lessons）：
+#   1. gitleaks 的 pre-commit hook 是 language: golang；执行机无 `go` 时，pre-commit 4.x
+#      会请求 https://go.dev/dl/?mode=json 查询 Go 工具链版本并 json.load() 解析；
+#   2. helper 规则 5 将 https://go.dev/dl/* 重写到 mirrors.aliyun.com/golang/（路径同构，
+#      面向 tarball 文件名设计）；/dl/?mode=json 被重写后返回的是阿里云目录页 HTML；
+#   3. json.load(HTML) → `JSONDecodeError: Expecting value` → pre-commit 中断、
+#      gitleaks 环境安装失败（gy-002 关闭 urlRewrite 后流水线全绿，因果闭环）。
+#
+# 预期（gy-006，urlRewrite.enabled=true 基线）：
+#   Stage A：curl go.dev/dl/?mode=json 返回非 JSON（阿里云目录页）→ 实锤劫持；
+#   Stage B：pre-commit run --all-files 输出含 JSONDecodeError → 完整复现，✅ 退出 0；
+#   若 Stage A 返回 JSON 或 Stage B pre-commit 正常通过 → 场景未复现（rewrite 关闭/go
+#   已预装/helper 规则变更），✗ 退出 1（复现型测试：复现不到即失败）。
+#
+# 运行：
+#   KC=~/.kube/gy-006.yaml
+#   kubectl --kubeconfig $KC -n squid create -f redirect/test/06-precommit-godev-repro-gy006.yaml
+#   kubectl --kubeconfig $KC -n squid logs -f <pod>
+#
+# 判定（机器可读）：日志 grep '✅' 为复现成功；exit code 0=Succeeded（Volcano 条件 Completed）
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: test-squid-precommit-repro-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-squid-precommit-repro
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 1800
+  tasks:
+    - name: test-squid-precommit-repro
+      replicas: 1
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+              command:
+                - bash
+                - -c
+              args:
+                - |
+                  #!/bin/bash
+                  set -u  # 不用 set -e：Stage A/B 任一步骤失败都要走判定分支输出 ✗/✅
+
+                  echo ""
+                  echo "=========================================="
+                  echo "Repro: pre-commit golang hook JSONDecodeError"
+                  echo "（urlRewrite 开启时 go.dev/dl 被重写为阿里云目录页）"
+                  echo "=========================================="
+                  T_START=$(date +%s%3N)
+
+                  echo ""
+                  echo "--- [0] 前置检查：go 必须不存在（否则 pre-commit 走 system go，不碰 go.dev） ---"
+                  if command -v go >/dev/null 2>&1; then
+                    echo "✗ go 已预装：$(command -v go)，pre-commit 不会走 go.dev 路径，复现前提不成立"
+                    exit 1
+                  fi
+                  echo "go not present ✓（pre-commit 将请求 go.dev/dl/?mode=json 自动安装）"
+
+                  echo ""
+                  echo "--- [1] 安装 git / pip / pre-commit（经 squid：apt→huaweicloud、pypi→huaweicloud 重写） ---"
+                  apt-get update -qq 2>&1 | tail -2 || true
+                  apt-get install -y -qq git curl python3-pip 2>&1 | tail -3 \
+                    || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq git curl python3-pip 2>&1 | tail -3; }
+                  pip3 install --break-system-packages -q pre-commit 2>&1 | tail -3
+                  pre-commit --version || { echo "✗ pre-commit 安装失败"; exit 1; }
+
+                  echo ""
+                  echo "=========================================="
+                  echo "Stage A：go.dev/dl/?mode=json 响应体取证"
+                  echo "=========================================="
+                  # 预期（rewrite 开）：HTTP 200 + text/html（aliyun 目录页，query 被忽略）
+                  # 预期（rewrite 关）：application/json，体首 [ {"version": "go1..."
+                  RC=$(curl -sS -o /tmp/godl.json \
+                    -w "HTTP %{http_code} | content_type=%{content_type} | size=%{size_download}B | %{time_total}s\n" \
+                    --max-time 60 "https://go.dev/dl/?mode=json") || RC="curl FAILED: $?"
+                  echo "$RC"
+                  echo "--- body 前 300 字节 ---"
+                  head -c 300 /tmp/godl.json; echo; echo "-----------------------"
+                  if head -c 1 /tmp/godl.json | grep -q '\['; then
+                    echo "Stage A: 响应为 JSON → go.dev 未被重写（urlRewrite 关闭或规则已变更）"
+                    STAGE_A_HIJACK=0
+                  else
+                    echo "Stage A: 响应非 JSON → go.dev/dl 已被重写（mirrors.aliyun.com/golang 目录页）✓"
+                    STAGE_A_HIJACK=1
+                  fi
+
+                  echo ""
+                  echo "=========================================="
+                  echo "Stage B：完整复现 pre-commit golang hook 安装"
+                  echo "=========================================="
+                  git config --global user.email repro@test.local
+                  git config --global user.name repro
+                  git config --global init.defaultBranch master
+                  mkdir -p /workspace/repro && cd /workspace/repro
+                  git init -q
+                  # 与 memcache 仓库同源同 rev（gitcode 镜像 + v8.30.1），language: golang
+                  cat > .pre-commit-config.yaml <<'YAML'
+                  repos:
+                    - repo: https://gitcode.com/GitHub_Trending/gi/gitleaks
+                      rev: v8.30.1
+                      hooks:
+                        - id: gitleaks
+                  YAML
+                  git add -A && git commit -qm repro
+                  # 判定点：pre-commit 4.x 安装 golangenv 时 _infer_go_version 的
+                  # json.load(urlopen('https://go.dev/dl/?mode=json')) 抛 JSONDecodeError
+                  pre-commit run --all-files > /tmp/pc.log 2>&1
+                  PC_RC=$?
+                  echo "--- pre-commit 输出（tail 25） ---"
+                  tail -25 /tmp/pc.log
+
+                  echo ""
+                  if grep -q "JSONDecodeError" /tmp/pc.log; then
+                    echo "JSONDecodeError 已出现 ✓（与 gy-002 线上报错同型）"
+                    echo "--- pre-commit.log traceback 关键行 ---"
+                    grep -E "JSONDecodeError|_infer_go_version|json.load|urlopen" \
+                      /root/.cache/pre-commit/pre-commit.log 2>/dev/null | head -8
+                    STAGE_B_REPRO=1
+                  elif [ $PC_RC -eq 0 ]; then
+                    echo "pre-commit 正常通过（未复现：go.dev 未被劫持，工具链安装/编译走通）"
+                    STAGE_B_REPRO=0
+                  else
+                    echo "pre-commit 失败但无 JSONDecodeError（其他原因，见上方输出/日志）"
+                    STAGE_B_REPRO=0
+                  fi
+
+                  echo ""
+                  echo "=========================================="
+                  echo "JUDGEMENT"
+                  echo "=========================================="
+                  echo "stage_a_godev_hijack=$STAGE_A_HIJACK  stage_b_jsondecode_repro=$STAGE_B_REPRO"
+                  if [ "$STAGE_A_HIJACK" -eq 1 ] && [ "$STAGE_B_REPRO" -eq 1 ]; then
+                    echo "✅ 复现成功：urlRewrite 劫持 go.dev/dl → pre-commit JSONDecodeError"
+                    T_END=$(date +%s%3N)
+                    echo "DURATION: $((T_END - T_START))ms"
+                    echo "=========================================="
+                    exit 0
+                  fi
+                  echo "✗ 复现失败：未形成劫持→JSONDecodeError 链路（检查 urlRewrite.enabled / helper 规则 5 / go 预装）"
+                  exit 1
+              lifecycle:
+                postStart:
+                  exec:
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set +e
+
+                        P=/etc/squid-ca/squid-ca.pem
+                        if [ -f "$P" ]; then
+                          if [ -d /etc/pki/ca-trust/source/anchors ]; then
+                            cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                            update-ca-trust extract >/dev/null 2>&1
+                          else
+                            cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                            update-ca-certificates -f >/dev/null 2>&1
+                          fi
+                        fi
+
+                        if command -v apt-get >/dev/null 2>&1 && [ -n "$HTTPS_PROXY" ]; then
+                          mkdir -p /etc/apt/apt.conf.d
+                          printf 'Acquire::http::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\nAcquire::https::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\n' > /etc/apt/apt.conf.d/99squid-proxy
+                        fi
+
+                        exit 0
+              workingDir: /workspace
+              resources:
+                limits:
+                  cpu: "4"
+                  memory: 6Gi
+                requests:
+                  cpu: "2"
+                  memory: 4Gi
+              env:
+                - name: HTTP_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: HTTPS_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: http_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: https_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: NO_PROXY
+                  value: "0.0.0.0,localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+                - name: no_proxy
+                  value: "0.0.0.0,localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+                # pre-commit 的 urllib 走 SSL_CERT_FILE 信任 squid 动态证书（bump 后 SAN 已覆盖）
+                - name: SSL_CERT_FILE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: CURL_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: REQUESTS_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_TERMINAL_PROMPT
+                  value: "0"
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+                - name: workspace
+                  mountPath: /workspace
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true
+            - name: workspace
+              emptyDir:
+                sizeLimit: 10Gi
+          nodeSelector:
+            kubernetes.io/arch: arm64
+          imagePullSecrets:
+            - name: huawei-swr-image-pull-secret-model-gy
+          activeDeadlineSeconds: 2400
+          securityContext:
+            runAsUser: 0
+          restartPolicy: Never

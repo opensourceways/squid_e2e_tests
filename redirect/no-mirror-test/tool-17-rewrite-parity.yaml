@@ -1,0 +1,303 @@
+# tool-17：重写规则"路径同构性"全量校验（gy-006，redirect 开启态）
+#
+# 校验 helper 全部重写规则的"镜像路径同构"假设：把原始 URL 喂给线上真实 helper
+# （挂载 squid-config CM）取 rewrite-url，再请求重写产物并按内容签名（JSON 字段/
+# gzip 魔数/ELF 魔数/repomd）判定。任何一条"部分同构"映射（如 2026-09-20 实测的
+# static.crates.io→rsproxy/crates 404）在此暴露。判定与运行见本文件脚本与 §9。
+#
+# 背景（2026-09-20，用户质疑）：helper 每条重写规则都隐含"镜像站与源站路径同构"假设。
+#   若某条映射只是**部分同构**（镜像站实际路径结构与源站不完全一致），重写后的 URL
+#   就会 404 / 返回错误内容——go.dev/dl?mode=json 被整体重写到 aliyun 拿到 HTML
+#   （JSONDecodeError 事故）就是"映射只对子集成立"的实例。
+#   本测试对 helper 全部 13 条规则逐条验证：真实重写产物 URL 必须返回**期望形态**的
+#   内容（状态码 + 魔数 + 关键字段），任何一条不同构即失败。
+#
+# 方法（两层解耦）：
+#   [A] helper 逻辑层：把原始 URL 喂给**线上真实 helper**（挂载 squid-config CM），
+#       取 rewrite-url 输出，同时断言重写目标符合规则定义（host + 路径形态）；
+#   [B] 镜像同构层：请求重写产物 URL，按内容签名判定（JSON 字段 / gzip 魔数
+#       1f8b / ELF 魔数 / repomd 标签等），证明镜像站该路径真实有效。
+#   大文件一律 HEAD 或 -r 0-65535 range，避免拉全量。
+#
+# 覆盖规则 ↔ 测试用例：
+#   规则1  pypi.org/simple           → pypi-simple（索引形态）
+#   规则2  files.pythonhosted/packages → pypi-packages（动态取真实 wheel 路径）
+#   规则3  github archive/releases   → gh-archive（gzip 魔数）+ gh-release（ELF 魔数）
+#   规则4  raw.githubusercontent     → gh-raw
+#   规则5  proxy.golang.org          → goproxy-list；go.dev/dl tarball → go-tarball（gzip 魔数）；
+#          go.dev/dl?mode=json       → go-json（JSON API 分流，2026-09-20 新增分支）
+#   规则6  archive.ubuntu.com        → ubuntu-release；ports.ubuntu.com → ports-release
+#   规则7  registry.npmjs.org        → npm-doc（versions 字段）+ npm-tgz（gzip 魔数）
+#   规则8  index/static.crates.io    → crates-index（sparse 路径）+ crates-static（gzip 魔数）
+#   规则9  conda.anaconda.org        → conda-cloud；repo.anaconda.com/pkgs|miniconda → conda-pkgs / miniconda
+#   规则10 repo.openeuler.org        → openeuler-repomd
+#   负样本对照 NEG-conda-missing-cloud：故意去掉 /cloud/ 前缀（模拟"部分同构"的错误映射），
+#   期望 404 —— 直观演示"路径不同构必出错"，用于证明判定方法有效。
+#
+# 运行（gy-002）：
+#   kubectl --kubeconfig ~/.kube/gy-002.yaml -n squid create -f <本文件>
+#   kubectl --kubeconfig ~/.kube/gy-002.yaml -n squid logs -f job/<pod-name>
+#   kubectl --kubeconfig ~/.kube/gy-002.yaml -n squid delete job <name>   # 清理
+# 退出码：0=全同构通过；1=存在不同构/失效映射（逐条 ✗ 见日志）
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: test-squid-tool17-rewrite-parity-
+  namespace: squid
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1200
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      labels:
+        pipeline/run-id: test-squid-tool17-rewrite-parity
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      imagePullSecrets:
+        - name: huawei-swr-image-pull-secret-model-gy
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: parity-test
+          # 与 06/07 测试同款基础镜像（apt 经 squid 重写可用）
+          image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+          command: [bash, -c]
+          args:
+            - |
+              set -u
+              HELPER=/etc/squid-config/rewrite-helper.sh
+              [ -f "$HELPER" ] || { echo "✗ helper 不存在：$HELPER"; exit 1; }
+
+              echo "--- [0] 安装 curl（apt 经 squid → huaweicloud 重写，顺带端到端验证规则6） ---"
+              apt-get update -qq 2>&1 | tail -1
+              apt-get install -y -qq curl 2>&1 | tail -2
+              curl --version | head -1
+
+              PASS=0; FAIL=0
+
+              # [A] 用线上真实 helper 重写；无 rewrite-url（原样放行）输出空
+              rw() { printf '%s\n' "$1" | sh "$HELPER" \
+                     | sed -n 's/.*rewrite-url="\([^"]*\)".*/\1/p'; }
+
+              # HEAD 校验（大文件）
+              ck_head() { # name url want_code
+                local name=$1 url=$2 want=$3 code
+                code=$(curl -sSI -L --max-time 60 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)
+                if [ "$code" = "$want" ]; then
+                  echo "✓ $name  [$url] HEAD=$code"; PASS=$((PASS+1))
+                else
+                  echo "✗ $name  [$url] HEAD=$code 期望=$want  ← 镜像路径不同构或失效"; FAIL=$((FAIL+1))
+                fi
+              }
+
+              # GET 校验（状态码 + 可选魔数 + 可选 grep 签名）
+              # 带 -r range 的 GET 命中 range 时返回 206 —— 与 200 同判（文件存在于该路径）
+              ck_get() { # name url want_code [magic_hex] [grep_pat]
+                local name=$1 url=$2 want=${3:-200} magic=${4:-} pat=${5:-}
+                local body=/tmp/body.$RANDOM
+                local code
+                code=$(curl -sS -L --max-time 90 -r 0-65535 -o "$body" -w '%{http_code}' "$url" 2>/dev/null)
+                case "$code" in
+                  "$want"|206) : ;;
+                  *)
+                    echo "✗ $name  [$url] GET=$code 期望=$want  ← 镜像路径不同构或失效"; FAIL=$((FAIL+1)); return 1 ;;
+                esac
+                if [ -n "$magic" ]; then
+                  # 取 4 字节再按期望长度前缀比较（gzip 魔数 3B，ELF 4B；gzip 第 4 字节
+                  # 是 FLG 标志位不固定，不能整体比较）
+                  local got; got=$(od -An -tx1 -N4 "$body" | tr -d ' \n')
+                  got=${got:0:${#magic}}
+                  if [ "$got" != "$magic" ]; then
+                    echo "✗ $name  [$url] 魔数=$got 期望=$magic（内容不是期望形态）"; FAIL=$((FAIL+1)); return 1
+                  fi
+                fi
+                if [ -n "$pat" ] && ! grep -qE "$pat" "$body"; then
+                  echo "✗ $name  [$url] 缺少期望签名 /$pat/（内容形态不对，同构性破坏）"; FAIL=$((FAIL+1)); return 1
+                fi
+                echo "✓ $name  [$url] GET=$code 签名OK"; PASS=$((PASS+1))
+              }
+
+              # [A] 重写目标断言
+              ck_rw() { # name origin expected_url
+                local name=$1 origin=$2 want=$3 got
+                got=$(rw "$origin")
+                if [ "$got" = "$want" ]; then
+                  echo "✓ $name(helper)  $origin → $got"; PASS=$((PASS+1))
+                else
+                  echo "✗ $name(helper)  $origin → '$got' 期望='$want'"; FAIL=$((FAIL+1))
+                fi
+              }
+
+              echo "=============================================="
+              echo " 重写规则路径同构性全量校验  $(date '+%F %T')"
+              echo " helper: $HELPER（线上 squid-config CM 实物）"
+              echo "=============================================="
+
+              echo ""
+              echo "--- 规则1/2 pypi → repo.huaweicloud.com/repository/pypi ---"
+              ck_rw pypi-simple https://pypi.org/simple/flask/ \
+                https://repo.huaweicloud.com/repository/pypi/simple/flask/
+              ck_get pypi-simple-content https://repo.huaweicloud.com/repository/pypi/simple/flask/ \
+                200 '' '\.\./\.\./packages/|files\.pythonhosted\.org'
+              # 动态取一个真实 wheel 路径：从镜像 simple 页提取相对路径 → 还原源站 URL → 喂 helper → HEAD
+              # （gzip: 1f8b 08 00 → 魔数统一取 4 字节 1f8b08；ELF: 7f454c46）
+              SIMPLE_HTML=$(curl -sS -L --max-time 60 https://repo.huaweicloud.com/repository/pypi/simple/flask/)
+              WHEEL_REL=$(printf '%s' "$SIMPLE_HTML" | grep -o 'href="[^"]*\.whl' | head -1 | sed 's/^href="//;s#^\.\./\.\./##')
+              if [ -n "$WHEEL_REL" ]; then
+                ORIGIN_WHL="https://files.pythonhosted.org/packages/${WHEEL_REL#packages/}"
+                ck_rw pypi-packages "$ORIGIN_WHL" \
+                  "https://repo.huaweicloud.com/repository/pypi/packages/${WHEEL_REL#packages/}"
+                ck_head pypi-packages-content "https://repo.huaweicloud.com/repository/pypi/packages/${WHEEL_REL#packages/}" 200
+              else
+                echo "✗ pypi-packages 动态取 wheel 路径失败（simple 页无 .whl 链接，页面头部诊断如下）"
+                printf '%s' "$SIMPLE_HTML" | head -c 300; echo; FAIL=$((FAIL+1))
+              fi
+
+              echo ""
+              echo "--- 规则3/4 github → gh-proxy 前缀式（注：前缀代理，非路径同构） ---"
+              ck_rw gh-archive https://github.com/mvdan/sh/archive/refs/tags/v3.10.0.tar.gz \
+                https://gh-proxy.test.osinfra.cn/https://github.com/mvdan/sh/archive/refs/tags/v3.10.0.tar.gz
+              ck_get gh-archive-content https://gh-proxy.test.osinfra.cn/https://github.com/mvdan/sh/archive/refs/tags/v3.10.0.tar.gz \
+                200 1f8b08
+              ck_rw gh-release https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64 \
+                https://gh-proxy.test.osinfra.cn/https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64
+              ck_get gh-release-content https://gh-proxy.test.osinfra.cn/https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64 \
+                200 7f454c46
+              ck_rw gh-raw https://raw.githubusercontent.com/mvdan/sh/master/README.md \
+                https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/mvdan/sh/master/README.md
+              ck_get gh-raw-content https://gh-proxy.test.osinfra.cn/https://raw.githubusercontent.com/mvdan/sh/master/README.md 200
+
+              echo ""
+              echo "--- 规则5 go：模块代理 goproxy.cn（同构）/ tarball→aliyun（同构）/ ?mode=json→golang.google.cn（分流） ---"
+              ck_rw goproxy-list https://proxy.golang.org/github.com/google/uuid/@v/list \
+                https://goproxy.cn/github.com/google/uuid/@v/list
+              ck_get goproxy-list-content https://goproxy.cn/github.com/google/uuid/@v/list 200 '' '^v'
+              ck_rw go-tarball https://go.dev/dl/go1.26.1.linux-amd64.tar.gz \
+                https://mirrors.aliyun.com/golang/go1.26.1.linux-amd64.tar.gz
+              ck_get go-tarball-content https://mirrors.aliyun.com/golang/go1.26.1.linux-amd64.tar.gz 200 1f8b08
+              ck_rw go-json https://go.dev/dl/?mode=json https://golang.google.cn/dl/?mode=json
+              ck_get go-json-content https://golang.google.cn/dl/?mode=json 200 '' '"version"'
+
+              echo ""
+              echo "--- 规则6 apt → repo.huaweicloud.com（host 交换，路径同构） ---"
+              ck_rw ubuntu-release http://archive.ubuntu.com/ubuntu/dists/noble/Release \
+                http://repo.huaweicloud.com/ubuntu/dists/noble/Release
+              ck_get ubuntu-release-content http://repo.huaweicloud.com/ubuntu/dists/noble/Release 200 '' 'Origin: Ubuntu'
+              ck_rw ports-release http://ports.ubuntu.com/ubuntu-ports/dists/noble/Release \
+                http://repo.huaweicloud.com/ubuntu-ports/dists/noble/Release
+              ck_get ports-release-content http://repo.huaweicloud.com/ubuntu-ports/dists/noble/Release 200 '' 'Origin: Ubuntu'
+
+              echo ""
+              echo "--- 规则7 npm → registry.npmmirror.com（host 交换，路径同构） ---"
+              ck_rw npm-doc https://registry.npmjs.org/left-pad \
+                https://registry.npmmirror.com/left-pad
+              ck_get npm-doc-content https://registry.npmmirror.com/left-pad 200 '' '"versions"'
+              ck_rw npm-tgz https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz \
+                https://registry.npmmirror.com/left-pad/-/left-pad-1.3.0.tgz
+              ck_get npm-tgz-content https://registry.npmmirror.com/left-pad/-/left-pad-1.3.0.tgz 200 1f8b08
+
+              echo ""
+              echo "--- 规则8 cargo → rsproxy（index 同构；static 经 /api/v1/crates/<crate>/<ver>/download） ---"
+              ck_rw crates-index https://index.crates.io/se/rd/serde \
+                https://rsproxy.cn/index/se/rd/serde
+              ck_get crates-index-content https://rsproxy.cn/index/se/rd/serde 200 '' '"vers"'
+              # 守卫：rsproxy index 的 dl 模板若再变，此断言会提醒同步改 helper 规则8
+              ck_get crates-config https://rsproxy.cn/index/config.json 200 '' 'api/v1/crates'
+              ck_rw crates-static https://static.crates.io/crates/serde/serde-1.0.210.crate \
+                https://rsproxy.cn/api/v1/crates/serde/1.0.210/download
+              ck_get crates-static-content https://rsproxy.cn/api/v1/crates/serde/1.0.210/download 200 1f8b08
+
+              echo ""
+              echo "--- 规则9 conda → nju（cloud/ 前缀重映射 + pkgs|miniconda 前缀重映射） ---"
+              ck_rw conda-cloud https://conda.anaconda.org/conda-forge/linux-64/repodata.json \
+                https://mirror.nju.edu.cn/anaconda/cloud/conda-forge/linux-64/repodata.json
+              ck_head conda-cloud-content https://mirror.nju.edu.cn/anaconda/cloud/conda-forge/linux-64/repodata.json 200
+              ck_rw conda-pkgs https://repo.anaconda.com/pkgs/main/linux-64/repodata.json \
+                https://mirror.nju.edu.cn/anaconda/pkgs/main/linux-64/repodata.json
+              ck_head conda-pkgs-content https://mirror.nju.edu.cn/anaconda/pkgs/main/linux-64/repodata.json 200
+              ck_rw miniconda https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
+                https://mirror.nju.edu.cn/anaconda/miniconda/Miniconda3-latest-Linux-x86_64.sh
+              ck_head miniconda-content https://mirror.nju.edu.cn/anaconda/miniconda/Miniconda3-latest-Linux-x86_64.sh 200
+
+              echo ""
+              echo "--- 规则10 openEuler → mirrors.huaweicloud.com/openeuler（host 交换，路径同构） ---"
+              ck_rw openeuler-repomd https://repo.openeuler.org/openEuler-24.03-LTS/OS/x86_64/repodata/repomd.xml \
+                https://mirrors.huaweicloud.com/openeuler/openEuler-24.03-LTS/OS/x86_64/repodata/repomd.xml
+              ck_get openeuler-repomd-content \
+                https://mirrors.huaweicloud.com/openeuler/openEuler-24.03-LTS/OS/x86_64/repodata/repomd.xml 200 '' '<repomd'
+
+              echo ""
+              echo "--- 负样本对照：故意模拟'部分同构'错误映射（去掉 /cloud/ 前缀）→ 期望 404 ---"
+              BAD=https://mirror.nju.edu.cn/anaconda/conda-forge/linux-64/repodata.json
+              BADCODE=$(curl -sS -L --max-time 60 -o /dev/null -w '%{http_code}' "$BAD" 2>/dev/null)
+              if [ "$BADCODE" = "404" ] || [ "$BADCODE" = "403" ]; then
+                echo "✓ NEG-demo  $BAD → $BADCODE（不同构必失效，判定方法有效）"; PASS=$((PASS+1))
+              else
+                echo "! NEG-demo  $BAD → $BADCODE（期望 404/403，nju 路径策略可能变化，不影响主判定）"
+              fi
+
+              echo ""
+              echo "=============================================="
+              echo " RESULT: pass=$PASS fail=$FAIL"
+              echo "=============================================="
+              [ "$FAIL" -eq 0 ] && echo "✅ 全部重写映射路径同构验证通过" && exit 0
+              echo "✗ 存在不同构/失效映射，逐条 ✗ 见上方日志" && exit 1
+          workingDir: /workspace
+          resources:
+            requests: {cpu: "1", memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
+          env:
+            # curl 全部经 squid 出口（镜像 URL 在 helper 里 passthrough，不改写）；
+            # 设 DIRECT=true 可改为直连镜像站（纯镜像侧验证）
+            - name: HTTP_PROXY
+              value: "http://squid-cache.squid.svc.cluster.local:3128"
+            - name: HTTPS_PROXY
+              value: "http://squid-cache.squid.svc.cluster.local:3128"
+            - name: http_proxy
+              value: "http://squid-cache.squid.svc.cluster.local:3128"
+            - name: https_proxy
+              value: "http://squid-cache.squid.svc.cluster.local:3128"
+            - name: NO_PROXY
+              value: "0.0.0.0,localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+            - name: no_proxy
+              value: "0.0.0.0,localhost,127.0.0.1,.svc.cluster.local,.cluster.local"
+            - name: SSL_CERT_FILE
+              value: /etc/squid-ca/squid-ca.pem
+            - name: CURL_CA_BUNDLE
+              value: /etc/squid-ca/squid-ca.pem
+          volumeMounts:
+            - name: squid-ca
+              mountPath: /etc/squid-ca
+              readOnly: true
+            - name: squid-config
+              mountPath: /etc/squid-config
+              readOnly: true
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - bash
+                  - -c
+                  - |
+                    set +e
+                    P=/etc/squid-ca/squid-ca.pem
+                    if [ -f "$P" ]; then
+                      cp "$P" /usr/local/share/ca-certificates/squid-ca.crt 2>/dev/null
+                      update-ca-certificates -f >/dev/null 2>&1
+                    fi
+                    printf 'Acquire::http::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\nAcquire::https::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\n' > /etc/apt/apt.conf.d/99squid-proxy
+                    exit 0
+      volumes:
+        - name: squid-ca
+          secret:
+            secretName: squid-ca-cert
+            items:
+              - key: squid-ca.pem
+                path: squid-ca.pem
+            optional: true
+        - name: squid-config
+          configMap:
+            name: squid-config

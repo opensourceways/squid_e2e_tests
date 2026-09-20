@@ -1,0 +1,204 @@
+# 对照实验：与 06-precommit-godev-repro-gy006.yaml 唯一差异 = 预装 go（对齐 CI 的 setup-go）
+#
+# 背景：gy-002 memcache CI 里，openlibing/pre-commit-action 的预检明明能看到
+#   go1.26.1（16:49:10 "检查 Go 环境... go version go1.26.1"），但 16:49:30 pre-commit
+#   仍然走了"无 go → go.dev/dl?mode=json → 被重写成阿里云 HTML → JSONDecodeError"。
+#   两种可能：
+#     假设H1：pre-commit 子进程丢失 PATH（action 启动方式导致 env-file 注入没传下去）
+#     假设H2：go 可见时 pre-commit 也会出别的错（用户质疑点，需排除）
+# 本测试证明：只要 go 在 pre-commit 进程的 PATH 里（默认位置 /usr/local/bin 软链，
+#   不依赖任何 env-file 注入机制），gitleaks hook 就能正常安装 → 反证 CI 里是 H1。
+#
+# 预期：✅ pre-commit 全绿（gitleaks hook 编译安装成功并运行）
+#   - go tarball：go.dev/dl/go1.26.1.linux-arm64.tar.gz 经 squid 重写 → aliyun 镜像（规则5本职）
+#   - go install ./... 的模块下载：proxy.golang.org 经 squid 重写 → goproxy.cn（规则5）
+#   - 与 CI 完全同链路，区别只在 go 的 PATH 可见性
+#
+# 运行：
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml -n squid create -f <本文件>
+#   kubectl --kubeconfig ~/.kube/gy-006.yaml -n squid logs -f <pod>
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: test-squid-precommit-withgo-
+  namespace: squid
+  labels:
+    kubernetes.io/arch: arm64
+    pipeline/run-id: test-squid-precommit-withgo
+spec:
+  policies:
+    - event: PodFailed
+      action: AbortJob
+  queue: shared-flexible-queue
+  maxRetry: 1
+  minAvailable: 1
+  ttlSecondsAfterFinished: 1800
+  tasks:
+    - name: test-squid-precommit-withgo
+      replicas: 1
+      maxRetry: 1
+      template:
+        spec:
+          containers:
+            - name: test
+              image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ubuntu:24.04
+              command:
+                - bash
+                - -c
+              args:
+                - |
+                  #!/bin/bash
+                  set -u
+
+                  echo ""
+                  echo "=========================================="
+                  echo "Control: pre-commit golang hook WITH go on PATH"
+                  echo "=========================================="
+                  T_START=$(date +%s%3N)
+
+                  echo ""
+                  echo "--- [1] 安装 git / pip / pre-commit（apt→huaweicloud、pypi→huaweicloud 重写） ---"
+                  apt-get update -qq 2>&1 | tail -2 || true
+                  apt-get install -y -qq git curl python3-pip 2>&1 | tail -3 \
+                    || { apt-get update -qq 2>&1 | tail -2 || true; apt-get install -y -qq git curl python3-pip 2>&1 | tail -3; }
+                  pip3 install --break-system-packages -q pre-commit 2>&1 | tail -3
+                  pre-commit --version
+
+                  echo ""
+                  echo "--- [2] 预装 go 1.26.1（go.dev/dl 经 squid 重写 → aliyun；与 CI setup-go 同版本） ---"
+                  T0=$(date +%s%3N)
+                  curl -fsSL -o /tmp/go.tgz --max-time 300 \
+                    https://go.dev/dl/go1.26.1.linux-arm64.tar.gz \
+                    || { echo "✗ go tarball 下载失败"; exit 1; }
+                  T1=$(date +%s%3N)
+                  echo "download took $((T1 - T0))ms, size: $(du -h /tmp/go.tgz | awk '{print $1}')"
+                  tar -C /usr/local -xzf /tmp/go.tgz
+                  # 关键：放默认 PATH（/usr/local/bin 软链），不依赖 env-file / export 传递——
+                  # 任何子进程环境都能看到，模拟"setup-go 注入真正传到了 pre-commit"的理想形态
+                  ln -sf /usr/local/go/bin/go /usr/local/bin/go
+                  ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+                  export PATH="/usr/local/go/bin:$PATH"
+                  go version
+                  # 对齐 CI action 的行为：写 GOPROXY=proxy.golang.org（验证 squid 重写兜底模块下载）
+                  go env -w GOPROXY=https://proxy.golang.org/,direct
+                  go env GOPROXY
+
+                  echo ""
+                  echo "--- [3] 与 CI 同源的 pre-commit 配置（gitleaks v8.30.1, gitcode 镜像） ---"
+                  git config --global user.email repro@test.local
+                  git config --global user.name repro
+                  git config --global init.defaultBranch master
+                  mkdir -p /workspace/repro && cd /workspace/repro
+                  git init -q
+                  cat > .pre-commit-config.yaml <<'YAML'
+                  repos:
+                    - repo: https://gitcode.com/GitHub_Trending/gi/gitleaks
+                      rev: v8.30.1
+                      hooks:
+                        - id: gitleaks
+                  YAML
+                  git add -A && git commit -qm repro
+
+                  echo ""
+                  echo "=========================================="
+                  echo "判定点：pre-commit run --all-files（期望全绿）"
+                  echo "=========================================="
+                  pre-commit run --all-files > /tmp/pc.log 2>&1
+                  PC_RC=$?
+                  tail -25 /tmp/pc.log
+                  echo ""
+                  if grep -q "JSONDecodeError" /tmp/pc.log; then
+                    echo "✗ 仍报 JSONDecodeError——go 可见却仍走 go.dev，推翻 H1，需重新归因"
+                    exit 1
+                  elif [ $PC_RC -eq 0 ]; then
+                    echo "✅ 对照成立：go 在 PATH 时 pre-commit 正常安装并运行 gitleaks hook"
+                    echo "   → CI 失败归因 H1：action 启动 pre-commit 子进程时丢失 env-file 注入的 PATH"
+                    T_END=$(date +%s%3N)
+                    echo "DURATION: $((T_END - T_START))ms"
+                    exit 0
+                  else
+                    echo "✗ pre-commit 失败（非 JSONDecodeError），原因见上方输出"
+                    exit 1
+                  fi
+              lifecycle:
+                postStart:
+                  exec:
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set +e
+
+                        P=/etc/squid-ca/squid-ca.pem
+                        if [ -f "$P" ]; then
+                          if [ -d /etc/pki/ca-trust/source/anchors ]; then
+                            cp "$P" /etc/pki/ca-trust/source/anchors/squid-ca.pem >/dev/null 2>&1
+                            update-ca-trust extract >/dev/null 2>&1
+                          else
+                            cp "$P" /usr/local/share/ca-certificates/squid-ca.crt >/dev/null 2>&1
+                            update-ca-certificates -f >/dev/null 2>&1
+                          fi
+                        fi
+
+                        if command -v apt-get >/dev/null 2>&1 && [ -n "$HTTPS_PROXY" ]; then
+                          mkdir -p /etc/apt/apt.conf.d
+                          printf 'Acquire::http::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\nAcquire::https::Proxy "http://squid-cache.squid.svc.cluster.local:3128";\n' > /etc/apt/apt.conf.d/99squid-proxy
+                        fi
+
+                        exit 0
+              workingDir: /workspace
+              resources:
+                limits:
+                  cpu: "4"
+                  memory: 6Gi
+                requests:
+                  cpu: "2"
+                  memory: 4Gi
+              env:
+                - name: HTTP_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: HTTPS_PROXY
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: http_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: https_proxy
+                  value: "http://squid-cache.squid.svc.cluster.local:3128"
+                - name: NO_PROXY
+                  value: "0.0.0.0,localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+                - name: no_proxy
+                  value: "0.0.0.0,localhost,127.0.0.1,.buildkitd,.svc.cluster.local,.cluster.local"
+                - name: SSL_CERT_FILE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: CURL_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: REQUESTS_CA_BUNDLE
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_SSL_CAINFO
+                  value: /etc/squid-ca/squid-ca.pem
+                - name: GIT_TERMINAL_PROMPT
+                  value: "0"
+              volumeMounts:
+                - name: squid-ca
+                  mountPath: /etc/squid-ca
+                  readOnly: true
+                - name: workspace
+                  mountPath: /workspace
+          volumes:
+            - name: squid-ca
+              secret:
+                secretName: squid-ca-cert
+                items:
+                  - key: squid-ca.pem
+                    path: squid-ca.pem
+                optional: true
+            - name: workspace
+              emptyDir:
+                sizeLimit: 10Gi
+          nodeSelector:
+            kubernetes.io/arch: arm64
+          imagePullSecrets:
+            - name: huawei-swr-image-pull-secret-model-gy
+          activeDeadlineSeconds: 2400
+          securityContext:
+            runAsUser: 0
+          restartPolicy: Never

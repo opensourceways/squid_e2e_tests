@@ -219,9 +219,19 @@ data:
         https://proxy.golang.org/*)
           echo "OK rewrite-url=\"https://goproxy.cn/${url#https://proxy.golang.org/}\"" ;;
         https://go.dev/dl/*|https://dl.google.com/go/*)
-          # Go 官方发行版分发（dl.google.com egress 被墙）→ 阿里云 golang 镜像路径同构
-          # （/<file> 一致，文件名全局唯一）；tarball immutable，长缓存见上方 refresh_pattern
-          echo "OK rewrite-url=\"https://mirrors.aliyun.com/golang/${url##*/}\"" ;;
+          # Go 官方版本分发。内含两类路径，必须分流处理：
+          case "$url" in
+            *\?mode=json*)
+              # 版本查询 API（pre-commit golang hook _infer_go_version 要拿真 JSON，
+              # 重写到 aliyun 会拿到 HTML 目录页 → JSONDecodeError，2026-09-20 gy-002 CI 实锤）。
+              # 重写到 Google 官方中国镜像（同路径同 JSON），实测 ~0.5s 稳定，
+              # 优于 go.dev 直连（~1-2s 抖动）；保留 include=all 等完整 query
+              echo "OK rewrite-url=\"https://golang.google.cn/dl/${url#*dl/}\"" ;;
+            *)
+              # 发行版 tarball（dl.google.com egress 被墙）→ 阿里云 golang 镜像路径同构
+              # （/<file> 一致，文件名全局唯一）；tarball immutable，长缓存见上方 refresh_pattern
+              echo "OK rewrite-url=\"https://mirrors.aliyun.com/golang/${url##*/}\"" ;;
+          esac ;;
         *://archive.ubuntu.com/*)
           echo "OK rewrite-url=\"${url%%://*}://repo.huaweicloud.com/${url#*archive.ubuntu.com/}\"" ;;
         *://ports.ubuntu.com/*)
@@ -231,7 +241,13 @@ data:
         https://index.crates.io/*)
           echo "OK rewrite-url=\"https://rsproxy.cn/index/${url#https://index.crates.io/}\"" ;;
         https://static.crates.io/crates/*)
-          echo "OK rewrite-url=\"https://rsproxy.cn/crates/${url#https://static.crates.io/crates/}\"" ;;
+          # static.crates.io 兜底映射（显式请求官方对象域的客户端）。rsproxy 真实下载
+          # 形态（2026-09-20 路径同构性实测，redirect/pathtest）：index config.json
+          #   dl=https://rsproxy.cn/api/v1/crates → /<crate>/<ver>/download → 307
+          #   → lf*-static.rsproxy.cn。旧映射 rsproxy/crates/<crate>/<file> 已 404 失效。
+          # 文件名按 crates.io 规则切分：最后一个 '-' 之前为 crate 名、之后为版本
+          _f=${url##*/}; _crate=${_f%-*}; _ver=${_f##*-}; _ver=${_ver%.crate}
+          echo "OK rewrite-url=\"https://rsproxy.cn/api/v1/crates/${_crate}/${_ver}/download\"" ;;
         https://conda.anaconda.org/*)
           echo "OK rewrite-url=\"https://mirror.nju.edu.cn/anaconda/cloud/${url#https://conda.anaconda.org/}\"" ;;
         https://repo.anaconda.com/pkgs/*|https://repo.anaconda.com/miniconda/*)

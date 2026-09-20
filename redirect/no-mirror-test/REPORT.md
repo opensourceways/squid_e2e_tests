@@ -8,6 +8,7 @@
   - CM（squid-config）在本 chart 模板之上叠加当日内容微调（2026-09-16，按"配置微调不 bump"约定 chart 版本未动）：conda 重写目标 tuna→nju、github release/archive refresh_pattern 合并为原始 host 规则
 - **执行方式**：`./run-all.sh`（Volcano Job 串行下发，轮询 Pod phase，日志落 `/tmp/no-mirror-rerun.log`）
 - **结论**：**14/14 全部 Succeeded**，零客户端配置（zero client config）下重写链路 + 缓存 + AKI 补丁全部验证通过
+- **最新回归**：2026-09-20 新增 tool-17/18 后全量 **18/18 Succeeded**，helper 两处同构性修复已下发 6 集群——见**第六节**
 
 ## 一、总体结果
 
@@ -102,3 +103,29 @@ KC=~/.kube/gy-005.yaml LOG=/tmp/no-mirror-rerun-005.log ./run-all.sh
 
 - 单用例：`kubectl --kubeconfig ~/.kube/gy-006.yaml create -f tool-11-conda.yaml -o name` 后轮询 Pod phase。
 - 注意：Volcano Job `get jobs` 不可见、condition 名为 `Completed`，勿用 `kubectl wait --for=condition=complete`（run-all.sh 已规避，踩坑史见脚本头注释）。
+
+## 六、2026-09-20 全量回归（18 用例）+ helper 同构性修复下发
+
+**背景**：gy-002 memcache PR 流水线 pre-commit gitleaks hook 报 `JSONDecodeError: Expecting value: line 2 column 1 (char 2)`——helper 规则 4b 把 `go.dev/dl/?mode=json`（JSON API）整体重写到 aliyun 目录页 HTML。排查时新增两个**重写质量守护型**用例（非工具装包型，纳入 run-all.sh 自动循环）：
+
+| 新用例 | 作用 | 实测发现（2026-09-20） |
+|---|---|---|
+| tool-17-rewrite-parity | 13 条规则逐条"路径同构性"校验：喂原始 URL 取线上真实 helper 重写结果，请求产物按内容签名判定（JSON/gzip `1f8b08`/ELF `7f454c46` 等）+ 负样本对照 | **规则 8 旧映射 `static.crates.io→rsproxy.cn/crates/*` 404**——rsproxy 真实下载端点是 `/api/v1/crates/<crate>/<ver>/download`（307→lf*-static.rsproxy.cn）。helper 已修复（按文件名最后一个 `-` 切分 crate/ver）+ config.json 守卫断言 |
+| tool-18-precommit-golang-hook | pre-commit golang hook 端到端（修复验证型：复现出 JSONDecodeError = FAIL） | 修复生效：`?mode=json*` 分流到 `golang.google.cn/dl/`（同路径同 JSON，~0.5s）；tarball 仍走 aliyun。无 go 预装环境下 JSON API→工具链下载→编译→扫描全链路自动走通 |
+
+**helper 修复**（规则 4b 分流 + 规则 8 crates 端点，chart 仍 0.1.11，CM 内容变更 + rollout restart）：
+
+- **gy-006 全量回归：18/18 Succeeded**（tool-01~16 + tool-17 `pass=38 fail=0` + tool-18 PASS）。tool-18 该轮冷缓存 + 出口拥塞 DURATION 475s——pre-commit 阶段输出重定向 `/tmp/pc.log`，静默期属正常非卡死（重跑实测 53s）。
+- **6 个开 redirect 集群全量下发并抽查确认**（pod 内 grep 两处修复均在）：
+
+| 集群 | helm revision | helper 新版抽查 |
+|---|---|---|
+| gy-006 | 79 | ✅ tool-17 38/38、tool-18 PASS |
+| gy-002 | 17 | ✅ |
+| gy-001 | 20 | ✅ |
+| gy-005 | 7 | ✅ |
+| wlcb-001 | 19 | ✅ |
+| ascend-cn12-001 | 6 | ✅ |
+
+- 详细方法与判定逻辑见 [TEST-WORKFLOW.md](TEST-WORKFLOW.md) §2 规则 4b/8 与 §9。
+- **教训**：URL 重写映射的同构性必须逐条实测，不能只靠设计推断——rsproxy 旧映射就是"设计同构但实际 404"的典型；tool-17 以后作为规则表变更的常驻回归门。

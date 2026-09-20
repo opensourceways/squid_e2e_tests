@@ -1,0 +1,39 @@
+# 实验专用 values —— 叠加在 values-006.yaml 之上（helm 多 -f 后者覆盖）
+#
+# 用法：
+#   helm upgrade squid ./chart -f deploy/values-006.yaml -f redirect/cachepeer-client-first/values-006-ccf.yaml \
+#     -n squid --kubeconfig ~/.kube/gy-006.yaml
+#
+# 版本标签：v0.1.11-ccf（cache_peer with client-first bump，实验预发布号，非机群版本；
+# 仅 Chart.yaml 实验期临时改为 0.1.11-ccf，机群其余集群保持 0.1.11 不动）
+#
+# 与 0.1.11 基线的全部差异 = 本文件内容：
+#   1. urlRewrite.enabled=false：helper 重写在 peer_select 之前，pypi/go 域被重写后
+#      键变为 huaweicloud/goproxy.cn，cache_peer 永不命中（CM §4.5 注释）——纯 cache_peer
+#      对照实验必须关掉 rewrite
+#   2. cachePeer 开启三 peer：pypi/go 走 TLS 化 terminator（client-first bumped 请求的
+#      上游被 squid 强制 TLS，FwdState.cc needsBump，明文 peer = wrong version number 503，
+#      0.1.14 实锤）；apt 为 http 明文域（不 bump），明文 peer 8081 作为 TLS 边界对照组
+squid:
+  cachePeer:
+    enabled: true
+    host: tls-terminator.squid.svc.cluster.local
+    peers:
+    # apt：明文 http 域（客户端请求不经 bump，squid 上游保持明文）→ 直连 cache-service 8081
+    - name: apt-peer
+      port: 8081
+      domains: ".archive.ubuntu.com .security.ubuntu.com .ports.ubuntu.com .debian.org"
+    # pypi：经 TLS terminator 8443 → cache-service 8086（originserver origin-form + Host 透传）
+    # ⚠️ .files.pythonhosted.org 是否纳入：先按 TEST-WORKFLOW P0 判定③验证 8086 是否镜像
+    #    /packages/ 路径；若镜像则把该域追加进 domains，否则 wheel 对象流量直连官方
+    - name: pypi-peer
+      port: 8443
+      domains: ".pypi.org"
+      tls: true
+    # go：经 TLS terminator 8444 → cache-service 8084（Nexus goproxy + goproxy.cn）
+    - name: go-peer
+      port: 8444
+      domains: ".proxy.golang.org"
+      tls: true
+  urlRewrite:
+    enabled: false

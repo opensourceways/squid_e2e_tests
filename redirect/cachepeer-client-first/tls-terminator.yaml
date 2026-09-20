@@ -1,0 +1,137 @@
+# TLS terminator —— client-first bump 下 cache_peer TLS 化的配套组件（gy-006 squid ns）
+#
+# 背景：client-first bumped 请求的 squid 上游连接被无条件 TLS 化（squid 7.x 源码
+# src/FwdState.cc::secureConnectionToPeerIfNeeded()，L977-984：
+#   needsBump = request->flags.sslPeek || request->flags.sslBumped
+#   needsBump=true → 无条件 secureConnectionToPeer()，peer/origin 同路径，无配置开关；
+# 非 originserver 的代理型 peer 走 establishTunnelThruProxy()（L896-901），不适用本项目），
+# 明文 nginx peer 必然 wrong version number 503（0.1.14 gy-006 实测，见 gy006-backup-20260915
+# /squid.conf.exp 摘除注释）。cache-service（nginx-pypi-cache）是共享测试服务，不动它的
+# conf —— 在 squid ns 内放一个轻量 TLS 终结层：
+#   squid --cache_peer tls--> tls-terminator:8443/8444 --明文 http--> cache-service:8086/8084
+#
+# 自签证书启动时生成（squid 侧 sslflags=DONT_VERIFY_PEER 不校验，证书内容无所谓）。
+# 镜像用集群已预热的 modelfoundry/alpine + 华为云 apk 源（与 chart initContainer 同源）。
+#
+# 部署：kubectl --kubeconfig ~/.kube/gy-006.yaml apply -f tls-terminator.yaml
+# 删除：kubectl --kubeconfig ~/.kube/gy-006.yaml delete -f tls-terminator.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tls-terminator-conf
+  namespace: squid
+  labels:
+    app: tls-terminator
+data:
+  default.conf: |
+    # pypi：8443 → cache-service 8086；proxy_pass 默认透传原 Host（pypi.org），
+    # origin-form + Host 由 squid cache_peer originserver 保证
+    server {
+      listen 8443 ssl;
+      ssl_certificate     /etc/nginx/cert/tls.pem;
+      ssl_certificate_key /etc/nginx/cert/tls.key;
+      location / {
+        proxy_pass http://cache-service.nginx-pypi-cache.svc.cluster.local:8086;
+        proxy_set_header Host $http_host;
+        proxy_ssl_server_name off;
+      }
+    }
+    # go：8444 → cache-service 8084（Nexus goproxy + goproxy.cn upstream）
+    server {
+      listen 8444 ssl;
+      ssl_certificate     /etc/nginx/cert/tls.pem;
+      ssl_certificate_key /etc/nginx/cert/tls.key;
+      location / {
+        proxy_pass http://cache-service.nginx-pypi-cache.svc.cluster.local:8084;
+        proxy_set_header Host $http_host;
+        proxy_ssl_server_name off;
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tls-terminator
+  namespace: squid
+  labels:
+    app: tls-terminator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tls-terminator
+  template:
+    metadata:
+      labels:
+        app: tls-terminator
+    spec:
+      containers:
+      - name: nginx
+        image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/alpine:3.23.3
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          # 华为云 apk 源（离线节点可达），安装 nginx + openssl
+          cat > /etc/apk/repositories <<EOF
+          https://mirrors.huaweicloud.com/alpine/v3.23/main
+          https://mirrors.huaweicloud.com/alpine/v3.23/community
+          EOF
+          apk add --no-cache nginx openssl
+          # 自签证书（squid 侧 DONT_VERIFY_PEER 不校验，CN 随意）
+          mkdir -p /etc/nginx/cert /run/nginx
+          openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+            -keyout /etc/nginx/cert/tls.key -out /etc/nginx/cert/tls.pem \
+            -subj "/CN=tls-terminator.squid.svc"
+          cp /conf/default.conf /etc/nginx/http.d/default.conf
+          exec nginx -g 'daemon off;'
+        ports:
+        - containerPort: 8443
+          name: pypi-tls
+        - containerPort: 8444
+          name: go-tls
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        readinessProbe:
+          tcpSocket:
+            port: 8443
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 8443
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        volumeMounts:
+        - name: conf
+          mountPath: /conf
+          readOnly: true
+      volumes:
+      - name: conf
+        configMap:
+          name: tls-terminator-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tls-terminator
+  namespace: squid
+  labels:
+    app: tls-terminator
+spec:
+  selector:
+    app: tls-terminator
+  ports:
+  - name: pypi-tls
+    port: 8443
+    targetPort: 8443
+  - name: go-tls
+    port: 8444
+    targetPort: 8444
