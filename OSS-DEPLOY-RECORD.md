@@ -159,9 +159,9 @@
 
 ***
 
-## 3. 新集群部署批次（2026-09-14 登记，待存储安排）
+## 3. 新集群部署批次（2026-09-14 登记，存储已就绪）
 
-> 状态：**values 已准备，等待存储安排，计划 2026-09-15 部署**。
+> 状态：**values 已准备，存储已就绪（2026-09-22 确认），可以部署**。
 > 部署基线：chart `squid-rpardini` 0.1.10（registry ACL 与 `registryProxy.registries` 同源自动生成；
 > catch-all 已切 `refresh_pattern . 0 0% 0 refresh-ims`）。
 
@@ -169,14 +169,14 @@
 
 | 集群 | values | 状态 |
 |---|---|---|
-| gy-003 | 待建（参照 values-gy-005.yaml） | ⏳ 等存储安排 |
-| gy-004 | 待建（参照 values-gy-005.yaml） | ⏳ 等存储安排 |
-| gy-005 | `deploy/values-gy-005.yaml`（storageClass=squid-subpath-sc，SFS Turbo `b46afb97` subpath 模式） | ⏳ 等存储安排 |
-| hk-001 | 待建（参照 values-gy-005.yaml） | ⏳ 等存储安排 |
-| aiframe | 待建（参照 values-gy-005.yaml） | ⏳ 等存储安排 |
-| mind | 待建（参照 values-gy-005.yaml） | ⏳ 等存储安排 |
+| gy-003 | 待建（参照 values-gy-005.yaml） | ✅ 存储就绪，可部署 |
+| gy-004 | 待建（参照 values-gy-005.yaml） | ✅ 存储就绪，可部署 |
+| gy-005 | `deploy/values-gy-005.yaml`（storageClass=squid-subpath-sc，SFS Turbo `b46afb97` subpath 模式） | ✅ 存储就绪，可部署 |
+| hk-001 | 待建（参照 values-gy-005.yaml） | ✅ 存储就绪，可部署 |
+| aiframe | 待建（参照 values-gy-005.yaml） | ✅ 存储就绪，可部署 |
+| mind | 待建（参照 values-gy-005.yaml） | ✅ 存储就绪，可部署 |
 
-> 各集群 StorageClass / SFS Turbo 绑定关系待存储安排确定后补入对应 values，
+> 各集群 StorageClass / SFS Turbo 绑定关系确定后补入对应 values，
 > `persistence.squidCache.size` 保持 50Gi（VolumeClaimTemplate 不可变约束）。
 
 ### 3.2 部署后动作（2026-09-15）
