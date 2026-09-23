@@ -207,3 +207,11 @@
 - 对应：§2.1 中「buildkit 场景被卡住：buildkitd 的 dockerfile 代理与镜像重定向问题未解决」，落地后即可打通贡献开源仓库的构建依赖下载。
 - **前置条件 / 待决策**：该方案需要容器以 **root 权限运行**（rootful 镜像），并要求授予多个 **Linux capabilities**（如 SYS_ADMIN）以及 **可写 cgroup**（cgroup v2 rw 挂载，用于资源控制）——权限要求较高，是否要部署？
 
+### 4.3 上游 issue 跟踪
+
+| Issue | 主题 | 关联 |
+|---|---|---|
+| [moby/buildkit#7185](https://github.com/moby/buildkit/issues/7185) | proxy network 下 `RUN` 内升级 `ca-certificates` 包会触发 `update-ca-certificates`/`update-ca-trust` 重建信任库，把 BuildKit 注入的代理 CA 冲掉，同 `RUN` 内后续 HTTPS 全部失败。修复方向：额外写入各发行版信任锚目录（`/usr/local/share/ca-certificates`、`/etc/pki/ca-trust/source/anchors` 等）。已在 `ccijunk/buildkit` `v0.33.0-ca-inject` 分支实现 | §4.2 前置补丁之一 |
+| [moby/buildkit#7186](https://github.com/moby/buildkit/issues/7186) | pip / Node.js 不读系统信任库（走 certifi / 内置 root store），看不到注入的 CA → `CERTIFICATE_VERIFY_FAILED`。修复：exec 环境注入 `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` / `PIP_CERT` / `GIT_SSL_CAINFO` / `NODE_EXTRA_CA_CERTS` 等（不覆盖已有值、不落镜像）。已在 `ccijunk/buildkit` `v0.33.0-inject-env` 分支实现 | **即 §4.2 计划文档对应的实现** |
+| [squid Bugzilla #5558](https://bugs.squid-cache.org/show_bug.cgi?id=5558) | Squid 上游 bug（Bugzilla 需登录，标题待确认；与本仓库 client-first bump 生成证书的 AKI 段上游处理路径相关） | §4.1 的 [DESIGN-aki-client-first-bump.md](https://github.com/ccijunk/squid/blob/v7.7.2/DESIGN-aki-client-first-bump.md) |
+
