@@ -139,6 +139,7 @@
 核心是 **§2 Runner ↔ Internal Cache 一对一映射**：8 组 runner（`linux-amd64-cpu-8-hk` 静态检查 / `linux-aarch64-a2b3-*` 上游 e2e / `linux-aarch64-a3-800i-*` main2main / 夜测·周测 NPU 机器 / `linux-arm64-cpu-16` csrc 缓存构建）当前直连内部缓存
 `cache-service.nginx-pypi-cache.svc.cluster.local`，按 5 种删除模式（P1 UV\_INDEX\_URL 整行删 → P5 公共源不动）改为公共源，
 公共源加速改由集群 squid 代理缓存承担——即 runner/workflow pod 侧的 squid 注入落地路径。9 个 workflow 文件中 5 个已完成。
+时间节点：PR 完成 **2026-09-30**；runner 注入 + PR 合并完成 **2026-10-10**。
 
 ### 2.2 仓库状态表（2026-09-10）
 
@@ -260,4 +261,46 @@
 2. **squid-ca（SSL-bump 签名 CA）过期无告警**：现有 `cert_probe_ok`/`CertExpiring` 覆盖的是 CI 命名空间证书（当前 gy-004 正在燃），不覆盖 squid 自签 CA。CA 过期 = 全集群 https 代理瘫痪。拨测（证书校验通过与否）或独立 cert expiry 检查均可。
 3. **registry-proxy（rpardini sidecar）无专项告警**：docker pull 场景走 registry-proxy，其故障仅被 Pod 级 KubePodCrashLooping 间接覆盖；缓存损坏/上游 502 无规则。registry-exporter（:9302）指标已在采，可加 `registry_proxy_up`/失败率规则。
 4. **可选：双副本同节点风险**：两副本可能调度到同一 node，节点故障双灭（SquidMetricsAbsent 能报，但分不清「节点挂」还是「抓取回退」）。可加 podAntiAffinity + node down 关联标注，非必须。
+
+> 注：§5.3 第 1 条（端到端拨测）可与 §6 的集成测试互补——拨测解决「持续自动发现」，集成测试解决「真实 CI 任务级别的验证」。
+
+## 6. 集成测试：真实 CI 任务端到端验证 squid（2026-09-29 规划，未实施）
+
+> 源仓库：[opensourceways/integration-tests](https://github.com/opensourceways/integration-tests)。
+> 目的：用**真实 CI 任务**验证 runner 注入 squid 的端到端链路——对应 §2.1 卡点 1「runner/workflow pod 注入测试尚未完成」。
+
+### 6.1 职责划分
+
+| 侧 | 职责 |
+|---|---|
+| **Runner 侧**（各集群/仓库内） | 在 `ascend-gha-runners`（GitHub）与 `computingactiontest`（GitCode）注册 self-hosted runner，runner 环境注入 `http_proxy`/`https_proxy` → squid + CA |
+| **integration-tests 仓库** | 纯触发入口 + 结果收集：部署 workflow YAML → dispatch → 轮询终态 → 拉日志。squid 验证方式：间接（job 绿/红）+ 直接（squid 机上 access.log） |
+
+### 6.2 触发路径
+
+| 平台 | 触发方式 | 传参 |
+|---|---|---|
+| GitCode `computingactiontest/<repo>` | 复用现成 `gitcode_services/phase02/scripts/workflow_runner.py`（部署 workflow → dispatch → 轮询终态 → 取日志；目标经 `GITCODE_OWNER`/`GITCODE_REPO`/`GITCODE_BRANCH` 配置，当前默认 `ComputingActionTest/bingo`） | `GITCODE_OWNER=computingactiontest GITCODE_REPO=<repo>` + workflow yaml |
+| GitHub `ascend-gha-runners/<repo>` | `gh workflow run <wf> -R ascend-gha-runners/<repo>`（或小段 REST dispatch 封装） | workflow 名 + ref |
+
+### 6.3 squid 侧验证（不在 integration-tests 仓库内）
+
+任务运行期间在 squid 侧看 `access.log`：
+
+- 第 1 次跑：`TCP_TUNNEL` / `TCP_MISS`（回源）
+- 第 2 次跑：`TCP_HIT`（缓存命中）——即缓存有效性检查
+
+### 6.4 时间节点（2026-09-29 登记）
+
+| 节点 | 时间 |
+|---|---|
+| 集成测试完成 | **2026-09-30** |
+
+> 注：vllm-ascend PR（9-30）/ runner 注入 + PR 合并（10-10）属于 §2.1 专项时间线，见 §2.1。
+
+### 6.5 待办
+
+- [ ] runner 注册：两平台各注册 self-hosted runner 并注入 proxy env + CA（注入脚本见 §2.1 专项 / DEPLOY.md §2.4）——2026-10-10
+- [ ] 选定测试 workflow（覆盖 pip/git/docker 等主要流量类型）——随集成测试 2026-09-30
+- [ ] 跑 1 次 MISS → 第 2 次 HIT 对比，留档结果回填本节——随集成测试 2026-09-30
 
