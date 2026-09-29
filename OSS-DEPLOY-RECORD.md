@@ -133,48 +133,55 @@
   2. **buildkit 场景被卡住**：buildkitd 的 dockerfile 代理与镜像重定向问题未解决。
 - 待这两项打通后，vllm/verl/sglang 等仓库的构建依赖下载即可整体落到 squid 缓存。
 
+**专项：vllm-ascend runner/workflow 注入计划**（2026-09-29 留档）——
+[PLAN-vllm-ascend-remove-internal-cache.md](PLAN-vllm-ascend-remove-internal-cache.md)
+（源：`vllm-ascend-forked/PLAN_remove_internal_cache_v2.md`，分支 `feat/remove-internal-cache-v2`）。
+核心是 **§2 Runner ↔ Internal Cache 一对一映射**：8 组 runner（`linux-amd64-cpu-8-hk` 静态检查 / `linux-aarch64-a2b3-*` 上游 e2e / `linux-aarch64-a3-800i-*` main2main / 夜测·周测 NPU 机器 / `linux-arm64-cpu-16` csrc 缓存构建）当前直连内部缓存
+`cache-service.nginx-pypi-cache.svc.cluster.local`，按 5 种删除模式（P1 UV\_INDEX\_URL 整行删 → P5 公共源不动）改为公共源，
+公共源加速改由集群 squid 代理缓存承担——即 runner/workflow pod 侧的 squid 注入落地路径。9 个 workflow 文件中 5 个已完成。
+
 ### 2.2 仓库状态表（2026-09-10）
 
 > squid 使用状态见 2.1（当前全部未接入）。
 
-| 仓库                              | 状态                   | 备注     | 问题描述   |
-| ------------------------------- | -------------------- | ------ | ------ |
-| alibaba/ROLL                    | ⏳ 未部署                | <br /> | <br /> |
-| areal-project/AReaL             | ⏳ 未部署                | <br /> | <br /> |
-| Ascend/pytorch                  | ⏳ 未部署                | <br /> | <br /> |
-| Ascend/sglang                   | ⏳ 未部署                | <br /> | <br /> |
-| fla-org/flash-linear-attention  | ⏳ 未部署                | <br /> | <br /> |
-| hiyouga/LlamaFactory            | ⏳ 未部署                | <br /> | <br /> |
-| modelscope/ms-swift             | ⏳ 未部署                | <br /> | <br /> |
-| sgl-project/sgl-kernel-npu      | ⏳ 未部署                | <br /> | <br /> |
-| sgl-project/sglang              | ⏳ 未部署                | <br /> | <br /> |
-| tile-ai/tilelang-mlir-ascend    | ⏳ 未部署                | <br /> | <br /> |
-| triton-lang/triton-ascend       | ⏳ 未部署                | <br /> | <br /> |
-| verl-project/verl               | ⏳ 未部署                | <br /> | <br /> |
-| verl-project/verl-omni          | ⏳ 未部署                | <br /> | <br /> |
-| verl-project/verl-SpeCo         | ⏳ 未部署                | <br /> | <br /> |
-| vllm-ascend/vllm-ascend-recipes | ⏳ 未部署                | <br /> | <br /> |
-| vllm-project/vllm-ascend        | ⏳ 未部署（随新集群批次部署，见 §3） | <br /> | <br /> |
-| vllm-project/vllm-omni          | ⏳ 未部署                | <br /> | <br /> |
+| 仓库                              | 状态                   | 备注                                                                                                            | 问题描述   |
+| ------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------- | ------ |
+| alibaba/ROLL                    | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| areal-project/AReaL             | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| Ascend/pytorch                  | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| Ascend/sglang                   | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| fla-org/flash-linear-attention  | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| hiyouga/LlamaFactory            | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| modelscope/ms-swift             | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| sgl-project/sgl-kernel-npu      | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| sgl-project/sglang              | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| tile-ai/tilelang-mlir-ascend    | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| triton-lang/triton-ascend       | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| verl-project/verl               | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| verl-project/verl-omni          | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| verl-project/verl-SpeCo         | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| vllm-ascend/vllm-ascend-recipes | ⏳ 未部署                | <br />                                                                                                        | <br /> |
+| vllm-project/vllm-ascend        | ⏳ 未部署（随新集群批次部署，见 §3） | runner 注入计划见 §2.1 专项 + [PLAN-vllm-ascend-remove-internal-cache.md](PLAN-vllm-ascend-remove-internal-cache.md) | <br /> |
+| vllm-project/vllm-omni          | ⏳ 未部署                | <br />                                                                                                        | <br /> |
 
 ***
 
 ## 3. 新集群部署批次（2026-09-14 登记，存储已就绪）
 
-> 状态：**values 已准备，存储已就绪（2026-09-22 确认），可以部署**。
+> 状态：**存储已就绪（2026-09-22 确认）；2026-09-29 更新：6 集群中 5 个已部署，hk-001 已部署但有 bug 待定位**。
 > 部署基线：chart `squid-rpardini` 0.1.10（registry ACL 与 `registryProxy.registries` 同源自动生成；
 > catch-all 已切 `refresh_pattern . 0 0% 0 refresh-ims`）。
 
 ### 3.1 本批次集群
 
-| 集群      | values                                                                                     | 状态         |
-| ------- | ------------------------------------------------------------------------------------------ | ---------- |
-| gy-003  | 待建（参照 values-gy-005.yaml）                                                                  | ✅ 存储就绪，可部署 |
-| gy-004  | 待建（参照 values-gy-005.yaml）                                                                  | ✅ 存储就绪，可部署 |
-| gy-005  | `deploy/values-gy-005.yaml`（storageClass=squid-subpath-sc，SFS Turbo `b46afb97` subpath 模式） | ✅ 存储就绪，可部署 |
-| hk-001  | 待建（参照 values-gy-005.yaml）                                                                  | ✅ 存储就绪，可部署 |
-| aiframe | 待建（参照 values-gy-005.yaml）                                                                  | ✅ 存储就绪，可部署 |
-| mind    | 待建（参照 values-gy-005.yaml）                                                                  | ✅ 存储就绪，可部署 |
+| 集群      | values                                                                                     | 状态                    |
+| ------- | ------------------------------------------------------------------------------------------ | --------------------- |
+| gy-003  | 待建（参照 values-gy-005.yaml）                                                                  | ✅ 已部署                 |
+| gy-004  | 待建（参照 values-gy-005.yaml）                                                                  | ✅ 已部署                 |
+| gy-005  | `deploy/values-gy-005.yaml`（storageClass=squid-subpath-sc，SFS Turbo `b46afb97` subpath 模式） | ✅ 已部署                 |
+| hk-001  | 待建（参照 values-gy-005.yaml）                                                                  | ⚠ 已部署，有 bug（待定位）      |
+| aiframe | 待建（参照 values-gy-005.yaml）                                                                  | ✅ 已部署                 |
+| mind    | 待建（参照 values-gy-005.yaml）                                                                  | ✅ 已部署                 |
 
 > 各集群 StorageClass / SFS Turbo 绑定关系确定后补入对应 values，
 > `persistence.squidCache.size` 保持 50Gi（VolumeClaimTemplate 不可变约束）。
@@ -209,37 +216,37 @@
 
 ### 4.3 上游 issue 跟踪
 
-| Issue                                                                     | 主题                                                                                                                                                                                                                                                                                         | 关联                                                                                                                     |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| [moby/buildkit#7185](https://github.com/moby/buildkit/issues/7185)        | proxy network 下 `RUN` 内升级 `ca-certificates` 包会触发 `update-ca-certificates`/`update-ca-trust` 重建信任库，把 BuildKit 注入的代理 CA 冲掉，同 `RUN` 内后续 HTTPS 全部失败。修复方向：额外写入各发行版信任锚目录（`/usr/local/share/ca-certificates`、`/etc/pki/ca-trust/source/anchors` 等）。已在 `ccijunk/buildkit` `v0.33.0-ca-inject` 分支实现 | §4.2 前置补丁之一                                                                                                            |
-| [moby/buildkit#7186](https://github.com/moby/buildkit/issues/7186)        | pip / Node.js 不读系统信任库（走 certifi / 内置 root store），看不到注入的 CA → `CERTIFICATE_VERIFY_FAILED`。修复：exec 环境注入 `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` / `PIP_CERT` / `GIT_SSL_CAINFO` / `NODE_EXTRA_CA_CERTS` 等（不覆盖已有值、不落镜像）。已在 `ccijunk/buildkit` `v0.33.0-inject-env` 分支实现                        | **即 §4.2 计划文档对应的实现**                                                                                                   |
-| [squid Bugzilla #5558](https://bugs.squid-cache.org/show_bug.cgi?id=5558) | Squid 上游 bug（Bugzilla 需登录；与 client-first bump 生成证书 AKI 段相关，对应下面 PR #2506）                                                                                                                                                                                                      | §4.1 的 [DESIGN-aki-client-first-bump.md](https://github.com/ccijunk/squid/blob/v7.7.2/DESIGN-aki-client-first-bump.md) |
-| [squid-cache/squid PR #2506](https://github.com/squid-cache/squid/pull/2506) | **client-first bump 证书缺 AKI 的上游修复 PR**：`mimicAuthorityKeyId()` 在 `mimicCert` 为空时提前返回，而 client-first bump 下 `properties.mimicCert` 为 null → 生成证书无 Authority Key Identifier，违反 RFC 5280 §4.2.1.1，严格校验器拒绝（Python 3.13+ `VERIFY_X509_STRICT`、`openssl verify -x509_strict` error 85）。修复：改为 `addAuthorityKeyId()`，keyIdentifier 值始终取自签名 CA（issuerCert），mimicCert 仅决定字段形态；`mimicExtensions()` 无条件调用并容忍 nil mimicCert，mimic 路径行为不变 | **§4.1 设计文档的上游化 PR**（同上） |
+| Issue                                                                        | 主题                                                                                                                                                                                                                                                                                                                                                                                                                          | 关联                                                                                                                     |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| [moby/buildkit#7185](https://github.com/moby/buildkit/issues/7185)           | proxy network 下 `RUN` 内升级 `ca-certificates` 包会触发 `update-ca-certificates`/`update-ca-trust` 重建信任库，把 BuildKit 注入的代理 CA 冲掉，同 `RUN` 内后续 HTTPS 全部失败。修复方向：额外写入各发行版信任锚目录（`/usr/local/share/ca-certificates`、`/etc/pki/ca-trust/source/anchors` 等）。已在 `ccijunk/buildkit` `v0.33.0-ca-inject` 分支实现                                                                                                                                  | §4.2 前置补丁之一                                                                                                            |
+| [moby/buildkit#7186](https://github.com/moby/buildkit/issues/7186)           | pip / Node.js 不读系统信任库（走 certifi / 内置 root store），看不到注入的 CA → `CERTIFICATE_VERIFY_FAILED`。修复：exec 环境注入 `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` / `PIP_CERT` / `GIT_SSL_CAINFO` / `NODE_EXTRA_CA_CERTS` 等（不覆盖已有值、不落镜像）。已在 `ccijunk/buildkit` `v0.33.0-inject-env` 分支实现                                                                                                                                                         | **即 §4.2 计划文档对应的实现**                                                                                                   |
+| [squid Bugzilla #5558](https://bugs.squid-cache.org/show_bug.cgi?id=5558)    | Squid 上游 bug（Bugzilla 需登录；与 client-first bump 生成证书 AKI 段相关，对应下面 PR #2506）                                                                                                                                                                                                                                                                                                                                                   | §4.1 的 [DESIGN-aki-client-first-bump.md](https://github.com/ccijunk/squid/blob/v7.7.2/DESIGN-aki-client-first-bump.md) |
+| [squid-cache/squid PR #2506](https://github.com/squid-cache/squid/pull/2506) | **client-first bump 证书缺 AKI 的上游修复 PR**：`mimicAuthorityKeyId()` 在 `mimicCert` 为空时提前返回，而 client-first bump 下 `properties.mimicCert` 为 null → 生成证书无 Authority Key Identifier，违反 RFC 5280 §4.2.1.1，严格校验器拒绝（Python 3.13+ `VERIFY_X509_STRICT`、`openssl verify -x509_strict` error 85）。修复：改为 `addAuthorityKeyId()`，keyIdentifier 值始终取自签名 CA（issuerCert），mimicCert 仅决定字段形态；`mimicExtensions()` 无条件调用并容忍 nil mimicCert，mimic 路径行为不变 | **§4.1 设计文档的上游化 PR**（同上）                                                                                               |
 
 ## 5. 监控告警（中央 Prometheus，2026-09-29 登记）
 
 **入口**：<http://113.44.182.82:9090/alerts?search=squid>
-**规则组**：`ci-infra-alerts`（prometheus-agent remote_write 汇聚，`job="squid"` 抓 squid-exporter :9301）
+**规则组**：`ci-infra-alerts`（prometheus-agent remote\_write 汇聚，`job="squid"` 抓 squid-exporter :9301）
 **采集现状核验**：6 集群 × 2 副本 = 12 target 全部 up；自定义指标（`squid_Cache_Misses_95` / `squid_info_Request_failure_ratio` / `squid_info_Hits_as_pct_of_all_requests_60min`）均有真实序列，规则非死配置；当前 14 条规则全部 **inactive**（无 squid 告警在燃）。
 
 ### 5.1 规则清单（14 条）
 
-| 告警 | 严重度 | 表达式要点 | 含义 |
-|---|---|---|---|
-| SquidTargetDown | critical | `up{job="squid"} == 0` 2min | exporter 抓取目标不可达（exporter 挂/pod 被删） |
-| SquidProcessDown | critical | `min_over_time(squid_up[5m]) == 0` | exporter 活但 cachemgr 探测失败——squid 假死/重启 |
-| SquidMetricsAbsent | critical | `count by (cluster)(up) < 2` 5min | 集群 target 少于 2（双 pod 同灭或抓取配置回退） |
-| SquidRecentlyRestarted | warning | `squid_info_UP_Time < 600` | 进程 10min 内重启过（频繁则查 OOM/磁盘/liveness） |
-| SquidSwapCleanedStorm | warning | `increase(swap_files_cleaned_total[15m]) > 50` | GC 风暴（gy-001 事故同款信号） |
-| SquidSwapInStorm | warning | `rate(swap_ins_total[15m]) > 10` | 磁盘换入速率异常，IO 压力/热数据反复交换 |
-| SquidDiskNearFull | warning | `Storage_Swap_capacity > 90` 15min | cache_dir 占用 >90%（需 df -h 交叉确认） |
-| SquidDiskCritical | critical | `Storage_Swap_capacity > 95` 10min | 即将写满——写满后全 MISS + swap 风暴 |
-| SquidFdExhaustion | warning | FD 使用率 >0.8 持续 10min | 逼近 fd 耗尽 → accept 失败、大面积拒连 |
-| SquidFileOpenQueued | warning | `Files_queued_for_open > 0` 10min | 文件打开队列积压，存储层（SFS Turbo）阻塞主循环 |
-| SquidUpstreamFailureRatioHigh | warning | `Request_failure_ratio > 0.05` 15min | 上游 429/503/超时占比 >5% |
-| SquidClientErrorBurst | warning | `rate(client_http_errors_total[10m]) > 5` | client 错误事务 >5/s（gy-001 风暴实测峰值 13.45/s） |
-| SquidHitRatioCollapsed | warning | 60min 命中率 <5% **且** 有流量 >1req/s **且** 缓存 >10% | 缓存被清空/失效或流量模式突变（带流量与缓存非空防误报） |
-| SquidMissP95Slow | warning | `max_over_time(Cache_Misses_95[10m]) > 10` 15min | MISS p95 服务时间 >10s，回源链路变慢 |
+| 告警                            | 严重度      | 表达式要点                                            | 含义                                      |
+| ----------------------------- | -------- | ------------------------------------------------ | --------------------------------------- |
+| SquidTargetDown               | critical | `up{job="squid"} == 0` 2min                      | exporter 抓取目标不可达（exporter 挂/pod 被删）     |
+| SquidProcessDown              | critical | `min_over_time(squid_up[5m]) == 0`               | exporter 活但 cachemgr 探测失败——squid 假死/重启  |
+| SquidMetricsAbsent            | critical | `count by (cluster)(up) < 2` 5min                | 集群 target 少于 2（双 pod 同灭或抓取配置回退）         |
+| SquidRecentlyRestarted        | warning  | `squid_info_UP_Time < 600`                       | 进程 10min 内重启过（频繁则查 OOM/磁盘/liveness）     |
+| SquidSwapCleanedStorm         | warning  | `increase(swap_files_cleaned_total[15m]) > 50`   | GC 风暴（gy-001 事故同款信号）                    |
+| SquidSwapInStorm              | warning  | `rate(swap_ins_total[15m]) > 10`                 | 磁盘换入速率异常，IO 压力/热数据反复交换                  |
+| SquidDiskNearFull             | warning  | `Storage_Swap_capacity > 90` 15min               | cache\_dir 占用 >90%（需 df -h 交叉确认）        |
+| SquidDiskCritical             | critical | `Storage_Swap_capacity > 95` 10min               | 即将写满——写满后全 MISS + swap 风暴               |
+| SquidFdExhaustion             | warning  | FD 使用率 >0.8 持续 10min                             | 逼近 fd 耗尽 → accept 失败、大面积拒连              |
+| SquidFileOpenQueued           | warning  | `Files_queued_for_open > 0` 10min                | 文件打开队列积压，存储层（SFS Turbo）阻塞主循环            |
+| SquidUpstreamFailureRatioHigh | warning  | `Request_failure_ratio > 0.05` 15min             | 上游 429/503/超时占比 >5%                     |
+| SquidClientErrorBurst         | warning  | `rate(client_http_errors_total[10m]) > 5`        | client 错误事务 >5/s（gy-001 风暴实测峰值 13.45/s） |
+| SquidHitRatioCollapsed        | warning  | 60min 命中率 <5% **且** 有流量 >1req/s **且** 缓存 >10%    | 缓存被清空/失效或流量模式突变（带流量与缓存非空防误报）            |
+| SquidMissP95Slow              | warning  | `max_over_time(Cache_Misses_95[10m]) > 10` 15min | MISS p95 服务时间 >10s，回源链路变慢               |
 
 ### 5.2 覆盖面评估
 
@@ -249,7 +256,7 @@
 
 ### 5.3 缺口与下一步建议（按优先级）
 
-1. **缺端到端拨测（最大缺口）**：现有 14 条全部依赖 exporter/cachemgr 内部指标。若 ssl-bump 配置错、CA 链失效、3128/3129 ACL 配错，squid 自身「一切正常」但客户端全挂，14 条规则一条都不会响。建议：仿照现有 `github_probe_success`（path=gh-proxy）CronJob+Pushgateway 模式，新增 `squid_probe_success{path="https"}` 拨测——经 squid 代理对 https://pypi.org/simple/ 等 2~3 个代表 URL 发起**证书校验**的请求断言 200，5min 失败即 critical。这一条同时覆盖下面第 2 条。
+1. **缺端到端拨测（最大缺口）**：现有 14 条全部依赖 exporter/cachemgr 内部指标。若 ssl-bump 配置错、CA 链失效、3128/3129 ACL 配错，squid 自身「一切正常」但客户端全挂，14 条规则一条都不会响。建议：仿照现有 `github_probe_success`（path=gh-proxy）CronJob+Pushgateway 模式，新增 `squid_probe_success{path="https"}` 拨测——经 squid 代理对 <https://pypi.org/simple/> 等 2\~3 个代表 URL 发起**证书校验**的请求断言 200，5min 失败即 critical。这一条同时覆盖下面第 2 条。
 2. **squid-ca（SSL-bump 签名 CA）过期无告警**：现有 `cert_probe_ok`/`CertExpiring` 覆盖的是 CI 命名空间证书（当前 gy-004 正在燃），不覆盖 squid 自签 CA。CA 过期 = 全集群 https 代理瘫痪。拨测（证书校验通过与否）或独立 cert expiry 检查均可。
 3. **registry-proxy（rpardini sidecar）无专项告警**：docker pull 场景走 registry-proxy，其故障仅被 Pod 级 KubePodCrashLooping 间接覆盖；缓存损坏/上游 502 无规则。registry-exporter（:9302）指标已在采，可加 `registry_proxy_up`/失败率规则。
 4. **可选：双副本同节点风险**：两副本可能调度到同一 node，节点故障双灭（SquidMetricsAbsent 能报，但分不清「节点挂」还是「抓取回退」）。可加 podAntiAffinity + node down 关联标注，非必须。
