@@ -14,7 +14,8 @@
 | 2026-09-22 | §3 存储（SFS Turbo）就绪确认，可部署 | ✅ | §3 |
 | 2026-09-29 | §3 批次部署：6 集群中 5 个已部署；hk-001 已部署但有 bug 待定位 | 🔄 | §3.1 |
 | 2026-09-29 | §5 中央 Prometheus 14 条 squid 告警上线（全部 inactive，无在燃） | ✅ | §5 |
-| 2026-09-30 | §6 集成测试完成（真实 CI 任务端到端验证 squid） | ⏳ 计划 | §6.4 |
+| 2026-09-30 | §6 集成测试完成——GitHub 侧（ascend-gha-runners） | ⏳ 计划 | §6.4 |
+| 2026-10-10 | §6 集成测试完成——GitCode 侧（computingactiontest） | ⏳ 计划 | §6.4 |
 | 2026-09-30 | vllm-ascend 内部缓存移除 PR 完成 | ⏳ 计划 | §2.1 |
 | 2026-10-10 | vllm-ascend runner 注入 + PR 合并完成 | ⏳ 计划 | §2.1 |
 
@@ -44,6 +45,7 @@
 
 | 任务 | 计划时间 | 出处 |
 |---|---|---|
-| 集成测试（opensourceways/integration-tests 触发真实 CI 验证） | 2026-09-30 | §6 |
+| 集成测试 GitHub 侧（ascend-gha-runners） | 2026-09-30 | §6 |
+| 集成测试 GitCode 侧（computingactiontest） | 2026-10-10 | §6 |
 | vllm-ascend 内部缓存移除 PR | 2026-09-30 | §2.1 |
 | vllm-ascend runner 注入 + PR 合并 | 2026-10-10 | §2.1 |
