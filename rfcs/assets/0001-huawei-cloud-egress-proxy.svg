@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Ascend CI 海外出口代理目标架构</title>
+  <desc id="desc">国内 CI 通过现有 Squid 进行域名分流，以加密和认证的代理链路访问香港精品 BGP EIP、独享 ELB 和两个可用区的代理实例。香港出口经独立公网出站链路访问 GitHub API 和 Registry。新加坡备用出口在第二阶段由国内 Squid 独立切换，不经过香港 ELB。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#364152"/>
+    </marker>
+    <marker id="green-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#168454"/>
+    </marker>
+    <style>
+      text { font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif; fill: #243047; }
+      .title { font-size: 28px; font-weight: 700; }
+      .subtitle { font-size: 14px; fill: #64748b; }
+      .area { fill: #fafbfc; stroke: #cbd5e1; stroke-width: 1.5; }
+      .accent-area { fill: #f4faf7; stroke: #93bea8; stroke-width: 1.5; }
+      .box { fill: #fff; stroke: #94a3b8; stroke-width: 1.6; }
+      .accent-box { fill: #fff; stroke: #168454; stroke-width: 2; }
+      .headline { font-size: 19px; font-weight: 700; }
+      .body { font-size: 15px; fill: #475569; }
+      .label { font-size: 14px; font-weight: 700; fill: #168454; }
+      .subnote { font-size: 13px; fill: #64748b; }
+      .solid { stroke: #364152; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .green { stroke: #168454; stroke-width: 3; fill: none; marker-end: url(#green-arrow); }
+      .branch { stroke: #168454; stroke-width: 2.5; fill: none; }
+      .backup { stroke: #64748b; stroke-width: 2.2; stroke-dasharray: 8 6; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1280" height="720" fill="#fff"/>
+  <text class="title" x="52" y="56">海外出口代理 · 目标架构</text>
+  <text class="subtitle" x="53" y="84">国内多集群统一入口｜香港双 AZ 主出口｜新加坡区域级备用出口（后续阶段）</text>
+  <path d="M52 104 H1228" stroke="#e2e8f0" stroke-width="2"/>
+  <text class="label" x="55" y="139">国内 CI</text>
+  <text class="label" x="390" y="139">本地接入与分流</text>
+  <text class="label" x="807" y="139">香港主出口</text>
+  <rect class="box" x="55" y="155" width="280" height="96" rx="8"/>
+  <text class="headline" text-anchor="middle" x="195" y="189">CI Runner / Job</text>
+  <text class="body" text-anchor="middle" x="195" y="214">国内多个 Kubernetes 集群</text>
+  <text class="subnote" text-anchor="middle" x="195" y="233">保持现有代理配置入口</text>
+  <rect class="box" x="390" y="155" width="360" height="96" rx="8"/>
+  <text class="headline" text-anchor="middle" x="570" y="187">现有 Squid + rpardini</text>
+  <text class="body" text-anchor="middle" x="570" y="211">GitHub API：CONNECT / TLS 透传</text>
+  <text class="subnote" text-anchor="middle" x="570" y="232">下载、镜像继续走现有缓存链</text>
+  <rect class="accent-box" x="806" y="155" width="419" height="96" rx="8"/>
+  <text class="headline" text-anchor="middle" x="1015" y="186">精品 BGP EIP + 独享 ELB</text>
+  <text class="body" text-anchor="middle" x="1015" y="210">公网入站 · TCP 负载分发</text>
+  <text class="subnote" text-anchor="middle" x="1015" y="232">EIP / ELB 兼容性需核验</text>
+  <path class="solid" d="M335 203 H387"/>
+  <path class="green" d="M750 203 H803"/>
+  <text class="subnote" x="776" y="188" text-anchor="middle">认证加密</text>
+  <rect class="accent-area" x="554" y="296" width="670" height="238" rx="11"/>
+  <text class="label" x="582" y="323">香港 VPC · 两个可用区</text>
+  <path class="branch" d="M1015 251 V324 H737 V343"/>
+  <path class="green" d="M1015 324 H1043 V343"/>
+  <rect class="accent-box" x="593" y="344" width="288" height="89" rx="8"/>
+  <text class="headline" text-anchor="middle" x="737" y="374">AZ 1 · Proxy A</text>
+  <text class="body" text-anchor="middle" x="737" y="396">ECS / Squid · 无状态</text>
+  <text class="subnote" text-anchor="middle" x="737" y="416">目标域名白名单</text>
+  <rect class="accent-box" x="899" y="344" width="288" height="89" rx="8"/>
+  <text class="headline" text-anchor="middle" x="1043" y="374">AZ 2 · Proxy B</text>
+  <text class="body" text-anchor="middle" x="1043" y="396">ECS / Squid · 无状态</text>
+  <text class="subnote" text-anchor="middle" x="1043" y="416">目标域名白名单</text>
+  <path class="branch" d="M737 433 V453 H892 V466"/>
+  <path class="branch" d="M1043 433 V453 H892"/>
+  <rect class="box" x="699" y="466" width="382" height="54" rx="8"/>
+  <text class="headline" text-anchor="middle" x="890" y="489">香港公网出站</text>
+  <text class="subnote" text-anchor="middle" x="890" y="509">ECS EIP / NAT · 出口故障域单独核验</text>
+  <path class="green" d="M890 534 V587"/>
+  <text class="subnote" x="906" y="567">公网回源</text>
+  <rect class="box" x="699" y="589" width="526" height="79" rx="8"/>
+  <text class="headline" x="962" y="619" text-anchor="middle">海外官方源站</text>
+  <text class="body" x="962" y="646" text-anchor="middle">GitHub API · GitHub 下载 · Docker Hub / Quay</text>
+  <rect class="area" x="55" y="554" width="386" height="114" rx="9"/>
+  <text class="headline" x="77" y="583">新加坡备用出口</text>
+  <text class="body" x="77" y="611">独立 Region、入口、代理及出站链路</text>
+  <text class="subnote" x="77" y="638">第二阶段启用；国内 Squid 决策切换</text>
+  <path class="backup" d="M570 251 V282 H241 V551"/>
+  <text class="subnote" x="250" y="291">区域级备用路径（不经香港 ELB）</text>
+  <path d="M52 687 H1228" stroke="#e2e8f0" stroke-width="2"/>
+  <text class="subnote" x="54" y="708">实线：香港主路径　　虚线：备用 Region　　说明：健康检查不等于端到端可达；已有 TCP 连接不保证无损切换</text>
+</svg>
