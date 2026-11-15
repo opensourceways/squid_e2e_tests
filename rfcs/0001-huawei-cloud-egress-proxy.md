@@ -37,32 +37,11 @@
 
 采用 **国内 Squid 域名分流 + 香港多 AZ 无状态代理 + 可观测的跨 Region 备用出口**。
 
-~~~text
-国内 CI Runner / Job
-          |
-          v
-各集群既有 Squid / rpardini
-  |       |
-  |       +-- 依赖包、Git Clone、Registry --> 既有缓存 / git-cdn / 回源
-  |
-  +-- api.github.com (CONNECT, TLS splice)
-          |
-      加密且认证的代理间链路
-          |
-          v
-    香港精品 BGP EIP（入站）
-          |
-    独享型 ELB（TCP，双 AZ）
-       /          \
-      v            v
-香港 AZ-1       香港 AZ-2
-出口 Squid A    出口 Squid B
-       \          /
-        +-- 独立、可验证的公网出站路径 --> GitHub API
-          |
-    国内 Squid 端到端健康判定
-          +-- 后续：新加坡独立出口 / 授权直连备用
-~~~
+![海外出口代理目标架构：国内 CI 经 Squid 分流至香港精品 BGP 和跨 AZ 代理，新加坡作为备用 Region](assets/0001-huawei-cloud-egress-proxy.svg)
+
+**图 3-1 · 海外出口代理目标架构。** 主路径为国内 Squid → 香港精品 BGP EIP / ELB → 双 AZ 代理 → 海外官方源站。国内缓存链保持不变；新加坡为第二阶段的独立区域级备用出口。
+
+注：精品 BGP EIP 与独享型 ELB 的产品组合、香港公网出站故障域尚待华为云账号级验证；图示为目标方案，不代表已部署。
 
 ### 3.1 核心组件职责
 
