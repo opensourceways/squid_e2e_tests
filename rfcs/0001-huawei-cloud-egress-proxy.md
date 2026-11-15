@@ -170,11 +170,38 @@
 4. 香港接入层是否可以购买并绑定精品 BGP EIP？香港出站 NAT 的独立故障域如何保证？需要云平台实测/配额确认。
 5. 是否已有可用的经批准跨境私网连接；如无，采用何种 mTLS 代理间传输与凭据轮换方案？
 
-## 9. 参考资料
+## 9. 产品与参考资料
 
-- 本仓库 [HA 方案](../solution.md)、[测试策略](../test.md)、[生产约束](../PRODUCTION.md)。
-- [华为云：精品动态 BGP 与全动态 BGP 对比](https://support.huaweicloud.com/eip_faq/faq_bandwidth_0013.html)。
-- [华为云：独享型 ELB 健康检查](https://support.huaweicloud.com/usermanual-elb/elb_ug_hc_0001.html)。
-- [华为云：GA 支持的终端节点类型](https://support.huaweicloud.com/usermanual-ga/ga_03_4001.html)。
-- [华为云：全球加速跨境资质](https://support.huaweicloud.com/usermanual-ga/ga_03_8001.html)。
-- [Squid 官方 cache_peer 文档](https://www.squid-cache.org/Doc/config/cache_peer/) 与 [SSL Bump](https://wiki.squid-cache.org/Features/SslBump)。
+以下均为**产品能力说明或现有工程事实**，不是本方案实测证明。可行性和上线结论必须以第 6 章各 V-ID 的实际记录为准；文档覆盖的产品能力不等于目标账号、Region、规格和带宽已满足部署要求。
+
+### 9.1 华为云官方产品文档
+
+| 产品/能力 | 官方参考 | 支持的设计判断 | 关联验证 |
+| --- | --- | --- | --- |
+| 弹性公网 IP（EIP）/ 精品动态 BGP | [静态、全动态及精品动态 BGP 区别](https://support.huaweicloud.com/eip_faq/faq_bandwidth_0013.html) | 精品动态 BGP 优化中国内地与中国香港的跨境网络路径；**不证明**其与目标 ELB 组合可用，也不保证香港至 GitHub 的出口质量 | V01、V04 |
+| 独享型 ELB | [独享型 ELB 健康检查](https://support.huaweicloud.com/usermanual-elb/elb_ug_hc_0001.html) | 健康检查与不健康后端摘除；TCP/HTTP 健康不能替代到 GitHub API 的业务探针 | V01、V05、V06 |
+| ELB 多可用区规划 | [独享型 ELB 子网和多 AZ IP 占用](https://support.huaweicloud.com/intl/zh-cn/elb_faq/elb_faq_210307.html) | 多 AZ 后端子网的网络规划依据；实际双 AZ、配额及路由仍须目标账号验证 | V01、V05 |
+| 公网 NAT 网关 | [购买公网 NAT 与约束](https://support.huaweicloud.com/usermanual-natgateway/zh-cn_topic_0150270259.html)、[添加 SNAT 规则](https://support.huaweicloud.com/usermanual-natgateway/zh-cn_topic_0127489529.html) | 多 ECS 共享 EIP 出站的可选实现；NAT 网关、SNAT 端口、EIP 和子网路由必须核验；共享 NAT 不等于独立故障域 | V01、V05、V08 |
+| 全球加速（GA） | [终端节点支持类型与区域](https://support.huaweicloud.com/usermanual-ga/ga_03_4001.html) | GA 可选 EIP/ECS/ELB 等终端节点；是否优于精品 BGP 需要相同测试窗口对照 | V09 |
+| GA 跨境通信 | [跨境资质申请](https://support.huaweicloud.com/usermanual-ga/ga_03_8001.html) | 中国大陆接入、境外后端的 GA 场景需要跨境资质审核；其他公网/专网跨境方案的合规要求仍需单独确认 | V02、V09 |
+
+### 9.2 代理协议、GitHub 官方文档
+
+| 技术/接口 | 官方参考 | 支持的设计判断 | 关联验证 |
+| --- | --- | --- | --- |
+| Squid 父级代理 | [cache_peer](https://www.squid-cache.org/Doc/config/cache_peer/)、[never_direct](https://www.squid-cache.org/Doc/config/never_direct/) | 上游 peer、强制转发配置依据；**不能由文档推断**现网版本对 CONNECT + splice + peer 的组合已验证 | V03、V06 |
+| Squid TLS 处理 | [ssl_bump 指令](https://www.squid-cache.org/Doc/config/ssl_bump/)、[Peek and Splice](https://wiki.squid-cache.org/Features/SslPeekAndSplice) | GitHub API TLS 透传策略依据；客户端对 GitHub 官方证书链的验证仍须实测 | V03、V07 |
+| GitHub REST API 限流 | [Rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)、[Best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api) | 403/429 按认证、限流及 Retry-After 处置，不能作为跨境出口故障或代理轮换触发条件 | V06、V07 |
+
+**版本边界：** Squid 官方的 `cache_peer`、`ssl_bump` 文档列出对应支持版本；目标镜像版本及配置解析是 V03 的一部分，不能默认未来大版本兼容。
+
+### 9.3 已有部署与测试工程
+
+| 工程事实/可复用资产 | 资料 | 关联验证 |
+| --- | --- | --- |
+| 现网 Squid 缓存和 Registry 回源职责 | [Ascend CI Squid 设计](https://github.com/opensourceways/ascend-ci-deployment/blob/main/manifests/squid-rpardini/SQUID-DESIGN.md) | V03、V04 |
+| Squid SSL Bump / peer / URL 重写实际模板 | [现网 chart/configmap.yaml](https://github.com/opensourceways/ascend-ci-deployment/blob/main/manifests/squid-rpardini/chart/templates/configmap.yaml) | V03 |
+| Runner 环境变量注入，`NO_PROXY` 含 `api.github.com` | [scripts/squid-injection.py](https://github.com/opensourceways/ascend-ci-deployment/blob/main/scripts/squid-injection.py) | V03 |
+| 可复用的代理 HA、故障注入与测试约定 | [本仓库方案](../solution.md)、[测试策略](../test.md)、[生产约束](../PRODUCTION.md) | V03、V05、V06、V08 |
+
+**尚缺证据：** 精品 BGP EIP 与独享型 ELB 绑定兼容性、完整加密代理链路、实际国内三网性能、香港双 AZ 出口独立性、端到端故障切换均**没有**通过上述文档得到实测确认，对应 V01–V08 仍为待验证。
